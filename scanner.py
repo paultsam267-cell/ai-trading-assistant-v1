@@ -179,7 +179,7 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     score += min(price_move / max(MIN_PRICE_MOVE_PCT, 0.1), 5.0)
     score += min(boosts_active, 3)
 
-        if signal_type == "LONG_CANDIDATE" and score < MIN_ALERT_SCORE:
+    if signal_type == "LONG_CANDIDATE" and score < MIN_ALERT_SCORE:
         return None
 
     if signal_type == "SHORT_WATCH" and score < MIN_SHORT_WATCH_SCORE:
