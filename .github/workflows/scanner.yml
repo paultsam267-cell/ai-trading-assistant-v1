@@ -49,7 +49,7 @@ jobs:
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
           MIN_ALERT_SCORE: "10.0"
-          MIN_SHORT_WATCH_SCORE: "11,5"
+          MIN_SHORT_WATCH_SCORE: "11.5"
         run: python scanner.py
 
       - name: Save scanner state
