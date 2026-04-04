@@ -16,6 +16,7 @@ MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "25000"))
 MIN_H1_VOLUME = float(os.getenv("MIN_H1_VOLUME", "15000"))
 MIN_SPIKE_RATIO = float(os.getenv("MIN_SPIKE_RATIO", "2.5"))
 MIN_PRICE_MOVE_PCT = float(os.getenv("MIN_PRICE_MOVE_PCT", "8"))
+MAX_PRICE_MOVE_PCT = float(os.getenv("MAX_PRICE_MOVE_PCT", "500"))
 ALERT_COOLDOWN_MIN = int(os.getenv("ALERT_COOLDOWN_MIN", "180"))
 TOP_N = int(os.getenv("TOP_N", "5"))
 
