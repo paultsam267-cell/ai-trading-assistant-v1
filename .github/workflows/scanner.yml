@@ -40,7 +40,7 @@ jobs:
           MAX_MARKET_CAP: "3000000"
           MIN_LIQUIDITY: "30000"
           MIN_H1_VOLUME: "30000"
-          MIN_SPIKE_RATIO: "3.5"
+          MIN_SPIKE_RATIO: "2.5"
           MIN_PRICE_MOVE_PCT: "12"
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
