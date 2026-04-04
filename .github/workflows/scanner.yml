@@ -15,7 +15,6 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Restore last scanner state
-        id: scanner_state_restore
         uses: actions/cache/restore@v4
         with:
           path: .scanner-state.json
@@ -44,6 +43,9 @@ jobs:
           MIN_H1_VOLUME: "30000"
           MIN_SPIKE_RATIO: "2.5"
           MIN_PRICE_MOVE_PCT: "12"
+          MAX_PRICE_MOVE_PCT: "1000"
+          BUY_SELL_RATIO_LONG_MIN: "1.05"
+          BUY_SELL_RATIO_SHORT_MAX: "0.95"
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
         run: python scanner.py
