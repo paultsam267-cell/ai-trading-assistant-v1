@@ -32,6 +32,11 @@ PREFERRED_QUOTES = {"USDC", "USDT", "BUSD", "WBNB", "BNB", "WSOL", "SOL"}
 session = requests.Session()
 session.headers.update({"User-Agent": "ai-trading-assistant-v1/1.0"})
 
+def _tier_points(value, tiers):
+    for threshold, points in sorted(tiers, key=lambda x: x[0], reverse=True):
+        if value >= threshold:
+            return points
+    return 0.0
 
 def num(value: Any, default: float = 0.0) -> float:
     try:
@@ -174,6 +179,12 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     score += min(price_move / max(MIN_PRICE_MOVE_PCT, 0.1), 5.0)
     score += min(boosts_active, 3)
 
+        if signal_type == "LONG_CANDIDATE" and score < MIN_ALERT_SCORE:
+        return None
+
+    if signal_type == "SHORT_WATCH" and score < MIN_SHORT_WATCH_SCORE:
+        return None
+    
     return {
         "chain": pair.get("chainId"),
         "dex": pair.get("dexId"),
