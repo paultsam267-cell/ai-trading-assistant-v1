@@ -18,12 +18,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .scanner-state.json
-                - name: Save scanner state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .scanner-state.json
           key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            scanner-state-${{ github.ref_name }}-
+            scanner-state-
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -46,7 +44,7 @@ jobs:
           MIN_SPIKE_RATIO: "2.5"
           MIN_PRICE_MOVE_PCT: "12"
           MAX_PRICE_MOVE_PCT: "1000"
-          BUY_SELL_RATIO_LONG_MIN: "1.05"
+          BUY_SELL_RATIO_LONG_MIN: "1.10"
           BUY_SELL_RATIO_SHORT_MAX: "0.95"
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
@@ -57,4 +55,4 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: .scanner-state.json
-          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}
+          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
