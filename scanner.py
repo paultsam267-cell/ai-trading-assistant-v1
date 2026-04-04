@@ -21,6 +21,8 @@ BUY_SELL_RATIO_LONG_MIN = float(os.getenv("BUY_SELL_RATIO_LONG_MIN", "1.10"))
 BUY_SELL_RATIO_SHORT_MAX = float(os.getenv("BUY_SELL_RATIO_SHORT_MAX", "0.95"))
 ALERT_COOLDOWN_MIN = int(os.getenv("ALERT_COOLDOWN_MIN", "240"))
 TOP_N = int(os.getenv("TOP_N", "3"))
+MIN_ALERT_SCORE = float(os.getenv("MIN_ALERT_SCORE", "4.0"))
+MIN_SHORT_WATCH_SCORE = float(os.getenv("MIN_SHORT_WATCH_SCORE", "4.2"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
