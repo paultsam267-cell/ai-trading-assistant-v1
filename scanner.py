@@ -146,7 +146,9 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if spike_ratio < MIN_SPIKE_RATIO:
         return None
     if price_move < MIN_PRICE_MOVE_PCT:
-        return None
+    return None
+if price_move > MAX_PRICE_MOVE_PCT:
+    return None
 
     boosts_active = int(num(pair.get("boosts", {}).get("active")))
     buys_h1 = int(num(pair.get("txns", {}).get("h1", {}).get("buys")))
