@@ -18,10 +18,12 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: .scanner-state.json
-          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}
-          restore-keys: |
-            scanner-state-${{ github.ref_name }}-
-            scanner-state-
+                - name: Save scanner state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .scanner-state.json
+          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Setup Python
         uses: actions/setup-python@v5
