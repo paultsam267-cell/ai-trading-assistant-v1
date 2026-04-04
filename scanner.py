@@ -10,17 +10,17 @@ BASE_URL = "https://api.dexscreener.com"
 STATE_PATH = Path(".scanner-state.json")
 
 SCAN_CHAINS = {c.strip().lower() for c in os.getenv("SCAN_CHAINS", "solana,bsc").split(",") if c.strip()}
-MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "50000"))
-MAX_MARKET_CAP = float(os.getenv("MAX_MARKET_CAP", "5000000"))
-MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "25000"))
-MIN_H1_VOLUME = float(os.getenv("MIN_H1_VOLUME", "15000"))
+MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "80000"))
+MAX_MARKET_CAP = float(os.getenv("MAX_MARKET_CAP", "3000000"))
+MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "30000"))
+MIN_H1_VOLUME = float(os.getenv("MIN_H1_VOLUME", "30000"))
 MIN_SPIKE_RATIO = float(os.getenv("MIN_SPIKE_RATIO", "2.5"))
-MIN_PRICE_MOVE_PCT = float(os.getenv("MIN_PRICE_MOVE_PCT", "8"))
+MIN_PRICE_MOVE_PCT = float(os.getenv("MIN_PRICE_MOVE_PCT", "12"))
 MAX_PRICE_MOVE_PCT = float(os.getenv("MAX_PRICE_MOVE_PCT", "1000"))
 BUY_SELL_RATIO_LONG_MIN = float(os.getenv("BUY_SELL_RATIO_LONG_MIN", "1.05"))
 BUY_SELL_RATIO_SHORT_MAX = float(os.getenv("BUY_SELL_RATIO_SHORT_MAX", "0.95"))
-ALERT_COOLDOWN_MIN = int(os.getenv("ALERT_COOLDOWN_MIN", "180"))
-TOP_N = int(os.getenv("TOP_N", "5"))
+ALERT_COOLDOWN_MIN = int(os.getenv("ALERT_COOLDOWN_MIN", "240"))
+TOP_N = int(os.getenv("TOP_N", "3"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -156,6 +156,15 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     buys_h1 = int(num(pair.get("txns", {}).get("h1", {}).get("buys")))
     sells_h1 = int(num(pair.get("txns", {}).get("h1", {}).get("sells")))
 
+    buy_sell_ratio = buys_h1 / max(sells_h1, 1)
+
+    if buy_sell_ratio >= BUY_SELL_RATIO_LONG_MIN:
+        signal_type = "LONG_CANDIDATE"
+    elif buy_sell_ratio <= BUY_SELL_RATIO_SHORT_MAX:
+        signal_type = "SHORT_WATCH"
+    else:
+        return None
+
     score = 0.0
     score += min(liquidity / max(MIN_LIQUIDITY, 1), 5.0)
     score += min(volume_h1 / max(MIN_H1_VOLUME, 1), 5.0)
@@ -180,6 +189,8 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         "price_move": price_move,
         "buys_h1": buys_h1,
         "sells_h1": sells_h1,
+        "buy_sell_ratio": round(buy_sell_ratio, 3),
+        "signal_type": signal_type,
         "boosts_active": boosts_active,
         "pair_url": pair.get("url"),
         "score": round(score, 2),
@@ -195,8 +206,10 @@ def fmt_money(value: float) -> str:
 
 
 def build_message(item: Dict[str, Any]) -> str:
+    signal_emoji = "🟢" if item["signal_type"] == "LONG_CANDIDATE" else "🟠"
+
     body = [
-        "🟢 <b>SCANNER HIT</b>",
+        f"{signal_emoji} <b>{item['signal_type']}</b>",
         f"<b>{item['symbol']}</b> | {item['chain']} | {item['dex']}",
         f"{item['name']}",
         "",
@@ -207,6 +220,7 @@ def build_message(item: Dict[str, Any]) -> str:
         f"Spike Ratio: <b>{item['spike_ratio']:.2f}x</b>",
         f"Price Move: <b>{item['price_move']:.2f}%</b>",
         f"H1 Txns: <b>{item['buys_h1']} buys / {item['sells_h1']} sells</b>",
+        f"Buy/Sell Ratio: <b>{item['buy_sell_ratio']:.3f}</b>",
         f"Boosts: <b>{item['boosts_active']}</b>",
         f"Score: <b>{item['score']}</b>",
         "",
@@ -251,7 +265,7 @@ def main() -> None:
         if not item:
             continue
 
-        state_key = f"{item['chain']}:{item['pair_address']}"
+        state_key = f"{item['chain']}:{item['pair_address']}:{item['signal_type']}"
         last_sent = int(state.get(state_key, 0))
         if now - last_sent < cooldown_sec:
             continue
@@ -265,9 +279,9 @@ def main() -> None:
 
     for item in hits:
         send_telegram(build_message(item))
-        state_key = f"{item['chain']}:{item['pair_address']}"
+        state_key = f"{item['chain']}:{item['pair_address']}:{item['signal_type']}"
         state[state_key] = now
-        print(f"[sent] {item['symbol']} on {item['chain']} score={item['score']}")
+        print(f"[sent] {item['symbol']} on {item['chain']} type={item['signal_type']} score={item['score']}")
 
     save_state(state)
 
