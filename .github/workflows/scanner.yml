@@ -15,11 +15,13 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Restore last scanner state
-        uses: actions/cache@v4
+        id: scanner_state_restore
+        uses: actions/cache/restore@v4
         with:
           path: .scanner-state.json
-          key: scanner-state-${{ github.run_id }}
+          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}
           restore-keys: |
+            scanner-state-${{ github.ref_name }}-
             scanner-state-
 
       - name: Setup Python
@@ -45,3 +47,10 @@ jobs:
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
         run: python scanner.py
+
+      - name: Save scanner state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .scanner-state.json
+          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}
