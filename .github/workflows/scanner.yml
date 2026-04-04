@@ -1,28 +1,50 @@
-name: AI Trading Assistant V1
+name: scanner
 
 on:
-  schedule:
-    - cron: "*/5 * * * *" # Runs every 5 minutes
   workflow_dispatch:
+  schedule:
+    - cron: "*/5 * * * *"
 
 jobs:
-  run-scanner:
+  scan:
     runs-on: ubuntu-latest
-    env:
-      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+    timeout-minutes: 10
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v5
 
-      - name: Set up Python
+      - name: Restore last scanner state
+        uses: actions/cache@v4
+        with:
+          path: .scanner-state.json
+          key: scanner-state-${{ github.run_id }}
+          restore-keys: |
+            scanner-state-
+
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
 
-      - name: Run scanner
-        run: python main.py
+      - name: Run real scanner
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+          SCAN_CHAINS: "solana,bsc"
+
+          MIN_MARKET_CAP: "50000"
+          MAX_MARKET_CAP: "5000000"
+          MIN_LIQUIDITY: "25000"
+          MIN_H1_VOLUME: "15000"
+          MIN_SPIKE_RATIO: "2.5"
+          MIN_PRICE_MOVE_PCT: "8"
+
+          ALERT_COOLDOWN_MIN: "180"
+          TOP_N: "5"
+        run: python scanner.py
