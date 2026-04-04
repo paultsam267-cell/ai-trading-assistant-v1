@@ -48,6 +48,8 @@ jobs:
           BUY_SELL_RATIO_SHORT_MAX: "0.95"
           ALERT_COOLDOWN_MIN: "240"
           TOP_N: "3"
+          MIN_ALERT_SCORE: "4.0"
+          MIN_SHORT_WATCH_SCORE: "4.2"
         run: python scanner.py
 
       - name: Save scanner state
