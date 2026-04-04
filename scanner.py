@@ -206,12 +206,20 @@ def fmt_money(value: float) -> str:
 
 
 def build_message(item: Dict[str, Any]) -> str:
-    signal_emoji = "🟢" if item["signal_type"] == "LONG_CANDIDATE" else "🟠"
+    if item["signal_type"] == "LONG_CANDIDATE":
+        signal_emoji = "🟢"
+        signal_title = "LONG_CANDIDATE"
+        bias_line = "Bias: bullish continuation"
+    else:
+        signal_emoji = "🟠"
+        signal_title = "SHORT_WATCH"
+        bias_line = "Bias: possible exhaustion / fade"
 
     body = [
-        f"{signal_emoji} <b>{item['signal_type']}</b>",
+        f"{signal_emoji} <b>{signal_title}</b>",
         f"<b>{item['symbol']}</b> | {item['chain']} | {item['dex']}",
         f"{item['name']}",
+        f"{bias_line}",
         "",
         f"Price: <b>${item['price_usd']:.8f}</b>",
         f"Market Cap: <b>{fmt_money(item['market_cap'])}</b>",
