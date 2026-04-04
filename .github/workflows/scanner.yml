@@ -31,19 +31,17 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
-      - name: Run real scanner
+          - name: Run real scanner
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
           SCAN_CHAINS: "solana,bsc"
-
           MIN_MARKET_CAP: "80000"
-MAX_MARKET_CAP: "3000000"
-MIN_LIQUIDITY: "50000"
-MIN_H1_VOLUME: "30000"
-MIN_SPIKE_RATIO: "3.5"
-MIN_PRICE_MOVE_PCT: "12"
-ALERT_COOLDOWN_MIN: "240"
-TOP_N: "3"
-        run: python scanner.py
+          MAX_MARKET_CAP: "3000000"
+          MIN_LIQUIDITY: "50000"
+          MIN_H1_VOLUME: "30000"
+          MIN_SPIKE_RATIO: "3.5"
+          MIN_PRICE_MOVE_PCT: "12"
+          ALERT_COOLDOWN_MIN: "240"
+          TOP_N: "3"
+        run: python scanner.py 
