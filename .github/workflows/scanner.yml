@@ -1,82 +1,47 @@
-name: ai-trading-scanner
+name: ai-trading-scanner-daily
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "2,7,12,17,22,27,32,37,42,47,52,57 * * * *"
+    - cron: "0 21 * * *"
+      timezone: "Europe/Athens"
 
 concurrency:
-  group: ai-trading-scanner-${{ github.ref }}
+  group: ai-trading-scanner-daily-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  run-scanner:
+  run-daily-scanner:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    env:
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+
+      SCAN_CHAINS: "solana,bsc"
+      MIN_MARKET_CAP: "80000"
+      MAX_MARKET_CAP: "3000000"
+      MIN_LIQUIDITY: "30000"
+      MIN_H24_VOLUME: "50000"
+      MAX_AGE_HOURS: "72"
+      MAX_TOKENS_PER_CHAIN: "60"
+      MAX_REPORT_ITEMS: "8"
+      REQUEST_TIMEOUT: "25"
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Restore scanner state
-        uses: actions/cache/restore@v4
-        with:
-          path: .scanner-state.json
-          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            scanner-state-${{ github.ref_name }}-
-            scanner-state-
-
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install dependencies
-        run: pip install requests
-
-      - name: Debug trigger
         run: |
-          echo "event_name=${{ github.event_name }}"
-          echo "schedule=${{ github.event.schedule }}"
-          echo "ref=${{ github.ref }}"
-          echo "ref_name=${{ github.ref_name }}"
+          python -m pip install --upgrade pip
+          pip install requests
 
       - name: Run scanner
-        env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          SCAN_CHAINS: "solana,bsc"
-          MIN_MARKET_CAP: "80000"
-          MAX_MARKET_CAP: "3000000"
-          MIN_LIQUIDITY: "30000"
-          MIN_H1_VOLUME: "30000"
-          MIN_SPIKE_RATIO: "2.5"
-          MIN_PRICE_MOVE_PCT: "12"
-          MAX_PRICE_MOVE_PCT: "1000"
-          BUY_SELL_RATIO_LONG_MIN: "1.10"
-          BUY_SELL_RATIO_SHORT_MAX: "0.95"
-          ALERT_COOLDOWN_MIN: "240"
-          TOP_N: "3"
-          MIN_ALERT_SCORE: "10.0"
-          MIN_SHORT_WATCH_SCORE: "11.5"
         run: python scanner.py
-
-      - name: Show scanner state
-        if: always()
-        run: |
-          echo "----- SCANNER STATE -----"
-          if [ -f .scanner-state.json ]; then
-            cat .scanner-state.json
-          else
-            echo ".scanner-state.json not found"
-          fi
-          echo "----- END SCANNER STATE -----"
-
-      - name: Save scanner state
-        if: always()
-        uses: actions/cache/save@v4
-        with:
-          path: .scanner-state.json
-          key: scanner-state-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
