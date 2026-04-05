@@ -243,38 +243,85 @@ def fmt_money(value: float) -> str:
     return f"${value:.0f}"
 
 
+def evaluate_context(item: Dict[str, Any]) -> Dict[str, str]:
+    phase = "ΜΕΣΑΙΑ ΦΑΣΗ 🟡"
+    risk = "ΜΕΤΡΙΟ 🟡"
+    warning = ""
+
+    price_move = item.get("price_move", 0)
+    spike = item.get("spike_ratio", 0)
+    liquidity = item.get("liquidity", 0)
+
+    if price_move < 25 and spike < 4:
+        phase = "ΝΩΡΙΣ 🟢"
+    elif price_move < 70:
+        phase = "ΜΕΣΑΙΑ ΦΑΣΗ 🟡"
+    else:
+        phase = "ΑΡΓΑ / ΚΟΝΤΑ ΣΤΗΝ ΚΟΡΥΦΗ 🔴"
+
+    if liquidity > 80000 and spike < 6:
+        risk = "ΧΑΜΗΛΟ 🟢"
+    elif liquidity > 30000:
+        risk = "ΜΕΤΡΙΟ 🟡"
+    else:
+        risk = "ΥΨΗΛΟ 🔴"
+
+    if liquidity < 20000:
+        warning = "⚠️ ΠΡΟΣΟΧΗ: ΧΑΜΗΛΗ ΡΕΥΣΤΟΤΗΤΑ"
+    elif spike > 10 and price_move > 80:
+        warning = "⚠️ ΠΡΟΣΟΧΗ: ΠΙΘΑΝΟ ΥΠΕΡΒΟΛΙΚΟ PUMP / ΠΙΘΑΝΗ ΔΙΟΡΘΩΣΗ"
+
+    return {
+        "phase": phase,
+        "risk": risk,
+        "warning": warning,
+    }
+
+
 def build_message(item: Dict[str, Any]) -> str:
+    context = evaluate_context(item)
+
     if item["signal_type"] == "LONG_CANDIDATE":
         signal_emoji = "🟢"
-        signal_title = "LONG_CANDIDATE"
-        bias_line = "Bias: bullish continuation"
+        signal_title = "ΠΙΘΑΝΗ ΑΓΟΡΑ"
+        bias_line = "Εκτίμηση: πιθανή ανοδική συνέχεια"
     else:
         signal_emoji = "🟠"
-        signal_title = "SHORT_WATCH"
-        bias_line = "Bias: possible exhaustion / fade"
+        signal_title = "ΠΡΟΣΟΧΗ ΓΙΑ ΠΤΩΣΗ"
+        bias_line = "Εκτίμηση: πιθανή κόπωση ή διόρθωση"
 
     pair_url = item.get("pair_url") or "https://dexscreener.com"
 
     body = [
         f"{signal_emoji} <b>{signal_title}</b>",
-        f"<b>{item.get('symbol') or 'UNKNOWN'}</b> | {item.get('chain') or '-'} | {item.get('dex') or '-'}",
+        f"<b>{item.get('symbol') or 'ΑΓΝΩΣΤΟ'}</b> | {item.get('chain') or '-'} | {item.get('dex') or '-'}",
         f"{item.get('name') or ''}",
         f"{bias_line}",
         "",
-        f"Price: <b>${item.get('price_usd', 0.0):.8f}</b>",
-        f"Market Cap: <b>{fmt_money(item.get('market_cap', 0.0))}</b>",
-        f"Liquidity: <b>{fmt_money(item.get('liquidity', 0.0))}</b>",
-        f"H1 Volume: <b>{fmt_money(item.get('volume_h1', 0.0))}</b>",
-        f"Spike Ratio: <b>{item.get('spike_ratio', 0.0):.2f}x</b>",
-        f"Price Move: <b>{item.get('price_move', 0.0):.2f}%</b>",
-        f"H1 Txns: <b>{item.get('buys_h1', 0)} buys / {item.get('sells_h1', 0)} sells</b>",
-        f"Buy/Sell Ratio: <b>{item.get('buy_sell_ratio', 0.0):.3f}</b>",
-        f"Boosts: <b>{item.get('boosts_active', 0)}</b>",
-        f"Score: <b>{item.get('score', 0.0)}</b>",
+        f"Φάση: <b>{context['phase']}</b>",
+        f"Ρίσκο: <b>{context['risk']}</b>",
         "",
-        f"<a href=\"{pair_url}\">Open on DexScreener</a>",
-        f"<code>{item.get('token_address') or ''}</code>",
+        f"Τιμή: <b>${item.get('price_usd', 0.0):.8f}</b>",
+        f"Κεφαλαιοποίηση: <b>{fmt_money(item.get('market_cap', 0.0))}</b>",
+        f"Ρευστότητα: <b>{fmt_money(item.get('liquidity', 0.0))}</b>",
+        f"Όγκος 1 ώρας: <b>{fmt_money(item.get('volume_h1', 0.0))}</b>",
+        f"Ένταση κίνησης: <b>{item.get('spike_ratio', 0.0):.2f}x</b>",
+        f"Μεταβολή τιμής: <b>{item.get('price_move', 0.0):.2f}%</b>",
+        f"Συναλλαγές 1 ώρας: <b>{item.get('buys_h1', 0)} αγορές / {item.get('sells_h1', 0)} πωλήσεις</b>",
+        f"Αναλογία αγορών/πωλήσεων: <b>{item.get('buy_sell_ratio', 0.0):.3f}</b>",
+        f"Boosts: <b>{item.get('boosts_active', 0)}</b>",
+        f"Βαθμολογία: <b>{item.get('score', 0.0)}</b>",
     ]
+
+    if context["warning"]:
+        body.extend(["", f"<b>{context['warning']}</b>"])
+
+    body.extend([
+        "",
+        f"<a href=\"{pair_url}\">Άνοιγμα στο DexScreener</a>",
+        f"<code>{item.get('token_address') or ''}</code>",
+    ])
+
     return "\n".join(body)
 
 
