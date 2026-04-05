@@ -9,7 +9,12 @@ import requests
 BASE_URL = "https://api.dexscreener.com"
 STATE_PATH = Path(".scanner-state.json")
 
-SCAN_CHAINS = {c.strip().lower() for c in os.getenv("SCAN_CHAINS", "solana,bsc").split(",") if c.strip()}
+SCAN_CHAINS = {
+    c.strip().lower()
+    for c in os.getenv("SCAN_CHAINS", "solana,bsc").split(",")
+    if c.strip()
+}
+
 MIN_MARKET_CAP = float(os.getenv("MIN_MARKET_CAP", "80000"))
 MAX_MARKET_CAP = float(os.getenv("MAX_MARKET_CAP", "3000000"))
 MIN_LIQUIDITY = float(os.getenv("MIN_LIQUIDITY", "30000"))
@@ -21,8 +26,8 @@ BUY_SELL_RATIO_LONG_MIN = float(os.getenv("BUY_SELL_RATIO_LONG_MIN", "1.10"))
 BUY_SELL_RATIO_SHORT_MAX = float(os.getenv("BUY_SELL_RATIO_SHORT_MAX", "0.95"))
 ALERT_COOLDOWN_MIN = int(os.getenv("ALERT_COOLDOWN_MIN", "240"))
 TOP_N = int(os.getenv("TOP_N", "3"))
-MIN_ALERT_SCORE = float(os.getenv("MIN_ALERT_SCORE", "4.0"))
-MIN_SHORT_WATCH_SCORE = float(os.getenv("MIN_SHORT_WATCH_SCORE", "4.2"))
+MIN_ALERT_SCORE = float(os.getenv("MIN_ALERT_SCORE", "10.0"))
+MIN_SHORT_WATCH_SCORE = float(os.getenv("MIN_SHORT_WATCH_SCORE", "11.5"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
@@ -30,13 +35,8 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 PREFERRED_QUOTES = {"USDC", "USDT", "BUSD", "WBNB", "BNB", "WSOL", "SOL"}
 
 session = requests.Session()
-session.headers.update({"User-Agent": "ai-trading-assistant-v1/1.0"})
+session.headers.update({"User-Agent": "ai-trading-assistant-v1/1.1"})
 
-def _tier_points(value, tiers):
-    for threshold, points in sorted(tiers, key=lambda x: x[0], reverse=True):
-        if value >= threshold:
-            return points
-    return 0.0
 
 def num(value: Any, default: float = 0.0) -> float:
     try:
@@ -77,13 +77,28 @@ def load_state() -> Dict[str, int]:
     if not STATE_PATH.exists():
         return {}
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
-    except Exception:
+        data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            cleaned: Dict[str, int] = {}
+            for k, v in data.items():
+                try:
+                    cleaned[str(k)] = int(v)
+                except (TypeError, ValueError):
+                    continue
+            return cleaned
+        return {}
+    except Exception as exc:
+        print(f"[warn] failed to load state: {exc}")
         return {}
 
 
 def save_state(state: Dict[str, int]) -> None:
-    STATE_PATH.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp_path = STATE_PATH.with_suffix(".tmp")
+    tmp_path.write_text(
+        json.dumps(state, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    tmp_path.replace(STATE_PATH)
 
 
 def get_candidate_tokens() -> List[Tuple[str, str]]:
@@ -140,7 +155,11 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     volume_h24 = get_bucket(pair.get("volume"), ("h24", "24h"))
 
     baseline_h1 = (volume_h24 / 24.0) if volume_h24 > 0 else 0.0
-    spike_ratio = (volume_h1 / baseline_h1) if baseline_h1 > 0 else (999.0 if volume_h1 >= MIN_H1_VOLUME else 0.0)
+    spike_ratio = (
+        volume_h1 / baseline_h1
+        if baseline_h1 > 0
+        else (999.0 if volume_h1 >= MIN_H1_VOLUME else 0.0)
+    )
 
     price_change_h1 = abs(get_bucket(pair.get("priceChange"), ("h1", "1h")))
     price_change_m5 = abs(get_bucket(pair.get("priceChange"), ("m5", "5m")))
@@ -178,18 +197,24 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     score += min(spike_ratio / max(MIN_SPIKE_RATIO, 0.1), 5.0)
     score += min(price_move / max(MIN_PRICE_MOVE_PCT, 0.1), 5.0)
     score += min(boosts_active, 3)
-    
+
     if signal_type == "LONG_CANDIDATE" and score < MIN_ALERT_SCORE:
         return None
-    
+
     if signal_type == "SHORT_WATCH" and score < MIN_SHORT_WATCH_SCORE:
         return None
-   
+
+    token_address = str(pair.get("baseToken", {}).get("address") or "").strip()
+    pair_address = str(pair.get("pairAddress") or "").strip()
+
+    if not token_address or not pair_address:
+        return None
+
     return {
         "chain": pair.get("chainId"),
         "dex": pair.get("dexId"),
-        "pair_address": pair.get("pairAddress"),
-        "token_address": pair.get("baseToken", {}).get("address"),
+        "pair_address": pair_address,
+        "token_address": token_address,
         "symbol": pair.get("baseToken", {}).get("symbol"),
         "name": pair.get("baseToken", {}).get("name"),
         "quote": pair.get("quoteToken", {}).get("symbol"),
@@ -212,9 +237,9 @@ def analyze_pair(pair: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 def fmt_money(value: float) -> str:
     if value >= 1_000_000:
-        return f"${value/1_000_000:.2f}M"
+        return f"${value / 1_000_000:.2f}M"
     if value >= 1_000:
-        return f"${value/1_000:.1f}K"
+        return f"${value / 1_000:.1f}K"
     return f"${value:.0f}"
 
 
@@ -228,25 +253,27 @@ def build_message(item: Dict[str, Any]) -> str:
         signal_title = "SHORT_WATCH"
         bias_line = "Bias: possible exhaustion / fade"
 
+    pair_url = item.get("pair_url") or "https://dexscreener.com"
+
     body = [
         f"{signal_emoji} <b>{signal_title}</b>",
-        f"<b>{item['symbol']}</b> | {item['chain']} | {item['dex']}",
-        f"{item['name']}",
+        f"<b>{item.get('symbol') or 'UNKNOWN'}</b> | {item.get('chain') or '-'} | {item.get('dex') or '-'}",
+        f"{item.get('name') or ''}",
         f"{bias_line}",
         "",
-        f"Price: <b>${item['price_usd']:.8f}</b>",
-        f"Market Cap: <b>{fmt_money(item['market_cap'])}</b>",
-        f"Liquidity: <b>{fmt_money(item['liquidity'])}</b>",
-        f"H1 Volume: <b>{fmt_money(item['volume_h1'])}</b>",
-        f"Spike Ratio: <b>{item['spike_ratio']:.2f}x</b>",
-        f"Price Move: <b>{item['price_move']:.2f}%</b>",
-        f"H1 Txns: <b>{item['buys_h1']} buys / {item['sells_h1']} sells</b>",
-        f"Buy/Sell Ratio: <b>{item['buy_sell_ratio']:.3f}</b>",
-        f"Boosts: <b>{item['boosts_active']}</b>",
-        f"Score: <b>{item['score']}</b>",
+        f"Price: <b>${item.get('price_usd', 0.0):.8f}</b>",
+        f"Market Cap: <b>{fmt_money(item.get('market_cap', 0.0))}</b>",
+        f"Liquidity: <b>{fmt_money(item.get('liquidity', 0.0))}</b>",
+        f"H1 Volume: <b>{fmt_money(item.get('volume_h1', 0.0))}</b>",
+        f"Spike Ratio: <b>{item.get('spike_ratio', 0.0):.2f}x</b>",
+        f"Price Move: <b>{item.get('price_move', 0.0):.2f}%</b>",
+        f"H1 Txns: <b>{item.get('buys_h1', 0)} buys / {item.get('sells_h1', 0)} sells</b>",
+        f"Buy/Sell Ratio: <b>{item.get('buy_sell_ratio', 0.0):.3f}</b>",
+        f"Boosts: <b>{item.get('boosts_active', 0)}</b>",
+        f"Score: <b>{item.get('score', 0.0)}</b>",
         "",
-        f"<a href=\"{item['pair_url']}\">Open on DexScreener</a>",
-        f"<code>{item['token_address']}</code>",
+        f"<a href=\"{pair_url}\">Open on DexScreener</a>",
+        f"<code>{item.get('token_address') or ''}</code>",
     ]
     return "\n".join(body)
 
@@ -266,6 +293,10 @@ def send_telegram(message: str) -> None:
     resp.raise_for_status()
 
 
+def state_key_for(item: Dict[str, Any]) -> str:
+    return f"{item['chain']}:{item['pair_address']}:{item['signal_type']}"
+
+
 def main() -> None:
     state = load_state()
     now = int(time.time())
@@ -277,21 +308,26 @@ def main() -> None:
     hits: List[Dict[str, Any]] = []
 
     for chain, token in candidates:
-        pairs = fetch_pairs(chain, token)
-        pair = choose_best_pair(pairs)
-        if not pair:
-            continue
+        try:
+            pairs = fetch_pairs(chain, token)
+            pair = choose_best_pair(pairs)
+            if not pair:
+                continue
 
-        item = analyze_pair(pair)
-        if not item:
-            continue
+            item = analyze_pair(pair)
+            if not item:
+                continue
 
-        state_key = f"{item['chain']}:{item['pair_address']}:{item['signal_type']}"
-        last_sent = int(state.get(state_key, 0))
-        if now - last_sent < cooldown_sec:
-            continue
+            state_key = state_key_for(item)
+            last_sent = int(state.get(state_key, 0))
+            if now - last_sent < cooldown_sec:
+                continue
 
-        hits.append(item)
+            hits.append(item)
+
+        except Exception as exc:
+            print(f"[error] processing {chain}/{token}: {exc}")
+            continue
 
     hits.sort(key=lambda x: x["score"], reverse=True)
     hits = hits[:TOP_N]
@@ -299,13 +335,26 @@ def main() -> None:
     print(f"[info] hits after filters: {len(hits)}")
 
     for item in hits:
-        send_telegram(build_message(item))
-        state_key = f"{item['chain']}:{item['pair_address']}:{item['signal_type']}"
-        state[state_key] = now
-        print(f"[sent] {item['symbol']} on {item['chain']} type={item['signal_type']} score={item['score']}")
+        state_key = state_key_for(item)
+        try:
+            send_telegram(build_message(item))
+            state[state_key] = now
+            save_state(state)
+            print(
+                f"[sent] {item.get('symbol')} on {item.get('chain')} "
+                f"type={item.get('signal_type')} score={item.get('score')}"
+            )
+        except Exception as exc:
+            print(f"[error] failed to send {item.get('symbol')}: {exc}")
+            continue
 
     save_state(state)
+    print("[info] scanner run complete")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        print(f"[fatal] scanner crashed: {exc}")
+        raise
