@@ -24,6 +24,7 @@ MAX_AGE_HOURS = float(os.getenv("MAX_AGE_HOURS", "72"))
 MAX_TOKENS_PER_CHAIN = int(os.getenv("MAX_TOKENS_PER_CHAIN", "60"))
 MAX_REPORT_ITEMS = int(os.getenv("MAX_REPORT_ITEMS", "8"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "25"))
+MIN_SCORE = float(os.getenv("MIN_SCORE", "35"))
 
 LATEST_PROFILES_ENDPOINT = f"{BASE_URL}/token-profiles/latest/v1"
 TOP_BOOSTS_ENDPOINT = f"{BASE_URL}/token-boosts/top/v1"
@@ -50,7 +51,7 @@ def get_json(url: str) -> Any:
 
 def chunked(items: List[str], size: int) -> Iterable[List[str]]:
     for i in range(0, len(items), size):
-        yield items[i : i + size]
+        yield items[i:i + size]
 
 
 def format_money(value: float) -> str:
@@ -111,6 +112,7 @@ def build_token_watchlist() -> Dict[str, List[str]]:
     final_map: Dict[str, List[str]] = {}
     for chain, tokens in chains_to_tokens.items():
         final_map[chain] = list(tokens)[:MAX_TOKENS_PER_CHAIN]
+
     return final_map
 
 
@@ -170,28 +172,6 @@ def select_best_pairs(raw_pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return list(best_by_token.values())
 
 
-def is_candidate(pair: Dict[str, Any]) -> bool:
-    chain = str(pair.get("chainId", "")).lower().strip()
-    if chain not in SCAN_CHAINS:
-        return False
-
-    market_cap = safe_float(pair.get("marketCap")) or safe_float(pair.get("fdv"))
-    liquidity = safe_float(pair.get("liquidity", {}).get("usd"))
-    volume_h24 = safe_float(pair.get("volume", {}).get("h24"))
-    age_h = hours_since(pair.get("pairCreatedAt"))
-
-    if not (MIN_MARKET_CAP <= market_cap <= MAX_MARKET_CAP):
-        return False
-    if liquidity < MIN_LIQUIDITY:
-        return False
-    if volume_h24 < MIN_H24_VOLUME:
-        return False
-    if age_h > MAX_AGE_HOURS:
-        return False
-
-    return True
-
-
 def score_pair(pair: Dict[str, Any]) -> float:
     liquidity = safe_float(pair.get("liquidity", {}).get("usd"))
     volume_h24 = safe_float(pair.get("volume", {}).get("h24"))
@@ -225,6 +205,30 @@ def score_pair(pair: Dict[str, Any]) -> float:
         score += 3
 
     return round(max(score, 0.0), 2)
+
+
+def is_candidate(pair: Dict[str, Any]) -> bool:
+    chain = str(pair.get("chainId", "")).lower().strip()
+    if chain not in SCAN_CHAINS:
+        return False
+
+    market_cap = safe_float(pair.get("marketCap")) or safe_float(pair.get("fdv"))
+    liquidity = safe_float(pair.get("liquidity", {}).get("usd"))
+    volume_h24 = safe_float(pair.get("volume", {}).get("h24"))
+    age_h = hours_since(pair.get("pairCreatedAt"))
+
+    if not (MIN_MARKET_CAP <= market_cap <= MAX_MARKET_CAP):
+        return False
+    if liquidity < MIN_LIQUIDITY:
+        return False
+    if volume_h24 < MIN_H24_VOLUME:
+        return False
+    if age_h > MAX_AGE_HOURS:
+        return False
+    if score_pair(pair) < MIN_SCORE:
+        return False
+
+    return True
 
 
 def build_report_items(candidates: List[Dict[str, Any]]) -> List[str]:
@@ -276,6 +280,7 @@ def build_daily_report(candidates: List[Dict[str, Any]]) -> str:
         f"- Liquidity >= {format_money(MIN_LIQUIDITY)}",
         f"- Volume 24h >= {format_money(MIN_H24_VOLUME)}",
         f"- Max age: {MAX_AGE_HOURS:.0f}h",
+        f"- Min score: {MIN_SCORE:.1f}",
         "",
     ]
 
@@ -298,7 +303,7 @@ def send_telegram_message(text: str) -> None:
         return
 
     max_len = 3900
-    chunks = [text[i : i + max_len] for i in range(0, len(text), max_len)]
+    chunks = [text[i:i + max_len] for i in range(0, len(text), max_len)]
 
     for chunk in chunks:
         response = SESSION.post(
@@ -327,7 +332,7 @@ def main() -> None:
             continue
         print(f"Φέρνω pairs για {chain}: {len(tokens)} tokens")
         raw_pairs.extend(fetch_pairs_for_chain(chain, tokens))
-               
+
     if not raw_pairs:
         raise RuntimeError("Δεν βρέθηκαν pairs από το DexScreener tokens endpoint.")
 
@@ -339,7 +344,8 @@ def main() -> None:
     print(f"Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}")
     report = build_daily_report(candidates)
     send_telegram_message(report)
-    print("Ολοκληρώθηκε το daily report.")   
-       
+    print("Ολοκληρώθηκε το daily report.")
+
+
 if __name__ == "__main__":
     main()
