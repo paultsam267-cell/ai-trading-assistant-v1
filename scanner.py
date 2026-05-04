@@ -1,3 +1,4 @@
+import json
 import os
 import time
 from collections import defaultdict
@@ -28,6 +29,48 @@ MIN_SCORE = float(os.getenv("MIN_SCORE", "35"))
 
 LATEST_PROFILES_ENDPOINT = f"{BASE_URL}/token-profiles/latest/v1"
 TOP_BOOSTS_ENDPOINT = f"{BASE_URL}/token-boosts/top/v1"
+ARCHIVE_DIR = "archive"
+ARCHIVE_ENABLED = os.getenv("ARCHIVE_ENABLED", "true").lower() == "true"
+
+def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> None:
+    if not ARCHIVE_ENABLED:
+        return
+
+    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+
+    ts = now_local()
+    filename = ts.strftime("%Y-%m-%d_%H-%M-%S.json")
+    path = os.path.join(ARCHIVE_DIR, filename)
+
+    items = []
+    for pair in candidates[:MAX_REPORT_ITEMS]:
+        base = pair.get("baseToken", {}) or {}
+        items.append({
+            "symbol": str(base.get("symbol") or "?").upper(),
+            "name": str(base.get("name") or ""),
+            "chain": str(pair.get("chainId", "?")).lower(),
+            "dex": str(pair.get("dexId", "?")),
+            "score": score_pair(pair),
+            "price_usd": safe_float(pair.get("priceUsd")),
+            "market_cap": safe_float(pair.get("marketCap")) or safe_float(pair.get("fdv")),
+            "liquidity_usd": safe_float(pair.get("liquidity", {}).get("usd")),
+            "volume_h24": safe_float(pair.get("volume", {}).get("h24")),
+            "change_h24": safe_float(pair.get("priceChange", {}).get("h24")),
+            "url": str(pair.get("url", "")).strip(),
+        })
+
+    payload = {
+        "timestamp": ts.isoformat(),
+        "min_score": MIN_SCORE,
+        "chains": sorted(SCAN_CHAINS),
+        "candidates_count": len(candidates),
+        "reported_count": min(len(candidates), MAX_REPORT_ITEMS),
+        "items": items,
+        "report_text": report_text,
+    }
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 
 def safe_float(value: Any, default: float = 0.0) -> float:
