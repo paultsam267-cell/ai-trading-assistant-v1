@@ -255,12 +255,15 @@ def build_report_items(candidates: List[Dict[str, Any]]) -> List[str]:
         lines.append(
             "\n".join(
                 [
-                    f"{idx}. {symbol} | {name}",
-                    f"   Score: {score} | Chain: {chain} | DEX: {dex}",
-                    f"   Price: {format_price(price_usd)} | MC: {format_money(market_cap)} | Liq: {format_money(liquidity)}",
-                    f"   Vol24h: {format_money(volume_h24)} | 24h: {format_pct(change_h24)} | H1 B/S: {buys_h1}/{sells_h1}",
-                    f"   Age: {age_h:.1f}h | Boosts: {boosts}",
-                    f"   {url}",
+                    f"#{idx} | {symbol} | {name}",
+                    f"⭐ Score: {score}",
+                    f"🌐 Chain: {chain} | DEX: {dex}",
+                    f"💵 Τιμή: {format_price(price_usd)}",
+                    f"🏦 MC: {format_money(market_cap)} | 💧 Liq: {format_money(liquidity)}",
+                    f"📊 Vol24h: {format_money(volume_h24)} | 📈 24h: {format_pct(change_h24)}",
+                    f"🟢/🔴 H1 Buys/Sells: {buys_h1}/{sells_h1}",
+                    f"⏳ Ηλικία: {age_h:.1f}h | 🚀 Boosts: {boosts}",
+                    f"🔗 {url}",
                 ]
             )
         )
