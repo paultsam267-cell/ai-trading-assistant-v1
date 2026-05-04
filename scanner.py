@@ -215,7 +215,7 @@ def select_best_pairs(raw_pairs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return list(best_by_token.values())
 
 
-def score_pair(pair: Dict[str, Any]) -> float:
+
     liquidity = safe_float(pair.get("liquidity", {}).get("usd"))
     volume_h24 = safe_float(pair.get("volume", {}).get("h24"))
     change_h24 = safe_float(pair.get("priceChange", {}).get("h24"))
@@ -248,7 +248,17 @@ def score_pair(pair: Dict[str, Any]) -> float:
         score += 3
 
     return round(max(score, 0.0), 2)
+    
+def classify_candidate(pair: Dict[str, Any]) -> str:
+    change_h24 = safe_float(pair.get("priceChange", {}).get("h24"))
+    buys_h1 = safe_float(pair.get("txns", {}).get("h1", {}).get("buys"))
+    sells_h1 = safe_float(pair.get("txns", {}).get("h1", {}).get("sells"))
 
+    if change_h24 >= 0 and buys_h1 > sells_h1:
+        return "LONG"
+    if change_h24 < 0 and sells_h1 > buys_h1:
+        return "SHORT_WATCH"
+    return "NEUTRAL"
 
 def is_candidate(pair: Dict[str, Any]) -> bool:
     chain = str(pair.get("chainId", "")).lower().strip()
@@ -294,12 +304,13 @@ def build_report_items(candidates: List[Dict[str, Any]]) -> List[str]:
         age_h = hours_since(pair.get("pairCreatedAt"))
         url = str(pair.get("url", "")).strip()
         score = score_pair(pair)
-
+        signal = classify_candidate(pair)
+        
         lines.append(
             "\n".join(
                 [
                     f"#{idx} | {symbol} | {name}",
-                    f"⭐ Score: {score}",
+                    f"📌 Σήμα: {signal} | ⭐ Score: {score}",
                     f"🌐 Chain: {chain} | DEX: {dex}",
                     f"💵 Τιμή: {format_price(price_usd)}",
                     f"🏦 MC: {format_money(market_cap)} | 💧 Liq: {format_money(liquidity)}",
