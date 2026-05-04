@@ -332,13 +332,13 @@ def main() -> None:
         raise RuntimeError("Δεν βρέθηκαν pairs από το DexScreener tokens endpoint.")
 
     best_pairs = select_best_pairs(raw_pairs)
-    candidates = [pair for pair in best_pairs if is_candidate(pair)]
-    candidates.sort(key=score_pair, reverse=True)
+candidates = [pair for pair in best_pairs if is_candidate(pair)]
+print(f"Υποψήφια pairs μετά τα filters: {len(candidates)}")
+candidates.sort(key=score_pair, reverse=True)
 
-    report = build_daily_report(candidates)
-    send_telegram_message(report)
-    print("Ολοκληρώθηκε το daily report.")
-
-
+report = build_daily_report(candidates)
+send_telegram_message(report)
+print("Ολοκληρώθηκε το daily report.")
+   
 if __name__ == "__main__":
     main()
