@@ -18,7 +18,6 @@ jobs:
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-
       SCAN_CHAINS: "solana,bsc"
       MIN_MARKET_CAP: "80000"
       MAX_MARKET_CAP: "3000000"
@@ -29,6 +28,8 @@ jobs:
       MAX_REPORT_ITEMS: "8"
       REQUEST_TIMEOUT: "25"
       MIN_SCORE: "40"
+      ARCHIVE_ENABLED: "true"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -43,8 +44,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-           - name: Run scanner
-          run: python scanner.py
+      - name: Run scanner
+        run: python scanner.py
 
       - name: Upload scanner archive
         uses: actions/upload-artifact@v4
@@ -52,3 +53,4 @@ jobs:
           name: scanner-archive
           path: archive
           retention-days: 7
+          if-no-files-found: warn
