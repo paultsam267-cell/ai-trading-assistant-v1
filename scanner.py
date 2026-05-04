@@ -270,29 +270,43 @@ def build_report_items(candidates: List[Dict[str, Any]]) -> List[str]:
 
 def build_daily_report(candidates: List[Dict[str, Any]]) -> str:
     ts = now_local().strftime("%d/%m/%Y %H:%M")
+
     header = [
-        "AI Trading Scanner | DAILY DEMO REPORT",
-        f"ώρα Ελλάδας: {ts}",
+        "📡 AI Trading Scanner | Ημερήσιο Demo Report",
+        f"🕒 Ώρα Ελλάδας: {ts}",
         "",
-        "Φίλτρα:",
-        f"- Chains: {', '.join(sorted(SCAN_CHAINS))}",
-        f"- Market Cap: {format_money(MIN_MARKET_CAP)} έως {format_money(MAX_MARKET_CAP)}",
-        f"- Liquidity >= {format_money(MIN_LIQUIDITY)}",
-        f"- Volume 24h >= {format_money(MIN_H24_VOLUME)}",
-        f"- Max age: {MAX_AGE_HOURS:.0f}h",
-        f"- Min score: {MIN_SCORE:.1f}",
+        "⚙️ Ενεργά φίλτρα:",
+        f"• Chains: {', '.join(sorted(SCAN_CHAINS))}",
+        f"• Market Cap: {format_money(MIN_MARKET_CAP)} έως {format_money(MAX_MARKET_CAP)}",
+        f"• Liquidity: από {format_money(MIN_LIQUIDITY)}",
+        f"• Volume 24h: από {format_money(MIN_H24_VOLUME)}",
+        f"• Μέγιστη ηλικία pair: {MAX_AGE_HOURS:.0f} ώρες",
+        f"• Ελάχιστο score: {MIN_SCORE:.1f}",
         "",
     ]
 
     if not candidates:
-        header.append("Δεν βρέθηκαν tokens που να περνούν τα φίλτρα σήμερα.")
-        header.append("")
-        header.append("Demo only. Όχι financial advice.")
+        header.extend([
+            "❌ Δεν βρέθηκαν tokens που να περνούν τα σημερινά φίλτρα.",
+            "",
+            "⚠️ Demo only - Όχι financial advice.",
+        ])
         return "\n".join(header)
 
-    body = ["Top candidates:", ""]
+    body = [
+        f"✅ Υποψήφια pairs μετά τα φίλτρα: {len(candidates)}",
+        f"📦 Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}",
+        "",
+        "🏆 Κορυφαία υποψήφια:",
+        "",
+    ]
     body.extend(build_report_items(candidates))
-    footer = ["", "Demo only. Όχι financial advice."]
+
+    footer = [
+        "",
+        "⚠️ Demo only - Όχι financial advice.",
+    ]
+
     return "\n".join(header + body + footer)
 
 
