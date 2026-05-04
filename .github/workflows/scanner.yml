@@ -43,5 +43,12 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run scanner
-        run: python scanner.py
+           - name: Run scanner
+          run: python scanner.py
+
+      - name: Upload scanner archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: scanner-archive
+          path: archive
+          retention-days: 7
