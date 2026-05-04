@@ -328,10 +328,10 @@ def main() -> None:
         print(f"Φέρνω pairs για {chain}: {len(tokens)} tokens")
         raw_pairs.extend(fetch_pairs_for_chain(chain, tokens))
 
-    if not raw_pairs:
+        if not raw_pairs:
         raise RuntimeError("Δεν βρέθηκαν pairs από το DexScreener tokens endpoint.")
 
-      best_pairs = select_best_pairs(raw_pairs)
+    best_pairs = select_best_pairs(raw_pairs)
     candidates = [pair for pair in best_pairs if is_candidate(pair)]
     print(f"Υποψήφια pairs μετά τα filters: {len(candidates)}")
     candidates.sort(key=score_pair, reverse=True)
