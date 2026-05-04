@@ -327,19 +327,19 @@ def main() -> None:
             continue
         print(f"Φέρνω pairs για {chain}: {len(tokens)} tokens")
         raw_pairs.extend(fetch_pairs_for_chain(chain, tokens))
+               
+    if not raw_pairs:
+        raise RuntimeError("Δεν βρέθηκαν pairs από το DexScreener tokens endpoint.")
 
-        if not raw_pairs:
-            raise RuntimeError("Δεν βρέθηκαν pairs από το DexScreener tokens endpoint.")
-
-        best_pairs = select_best_pairs(raw_pairs)
-        print(f"Καλύτερα pairs μετά την επιλογή: {len(best_pairs)}")
-        candidates = [pair for pair in best_pairs if is_candidate(pair)]
-        print(f"Υποψήφια pairs μετά τα filters: {len(candidates)}")
-        candidates.sort(key=score_pair, reverse=True)
-        print(f"Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}")
-        report = build_daily_report(candidates)
-        send_telegram_message(report)
-        print("Ολοκληρώθηκε το daily report.")
+    best_pairs = select_best_pairs(raw_pairs)
+    print(f"Καλύτερα pairs μετά την επιλογή: {len(best_pairs)}")
+    candidates = [pair for pair in best_pairs if is_candidate(pair)]
+    print(f"Υποψήφια pairs μετά τα filters: {len(candidates)}")
+    candidates.sort(key=score_pair, reverse=True)
+    print(f"Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}")
+    report = build_daily_report(candidates)
+    send_telegram_message(report)
+    print("Ολοκληρώθηκε το daily report.")   
        
 if __name__ == "__main__":
     main()
