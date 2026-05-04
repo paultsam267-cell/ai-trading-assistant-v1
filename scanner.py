@@ -404,9 +404,9 @@ def main() -> None:
     candidates.sort(key=score_pair, reverse=True)
     print(f"Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}")
     report = build_daily_report(candidates)
-save_report_archive(candidates, report)
-send_telegram_message(report)
-print("Ολοκληρώθηκε το daily report.")
+    save_report_archive(candidates, report)
+    send_telegram_message(report)
+    print("Ολοκληρώθηκε το daily report.")
 
 
 if __name__ == "__main__":
