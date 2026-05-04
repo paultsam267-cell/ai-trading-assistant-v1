@@ -321,6 +321,7 @@ def send_telegram_message(text: str) -> None:
 
 def main() -> None:
     print("Ξεκινάω scan...")
+    print(f"Ελάχιστο score φίλτρου: {MIN_SCORE}")
     watchlist = build_token_watchlist()
 
     if not watchlist:
