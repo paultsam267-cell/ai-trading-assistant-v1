@@ -28,7 +28,7 @@ jobs:
       MAX_TOKENS_PER_CHAIN: "60"
       MAX_REPORT_ITEMS: "8"
       REQUEST_TIMEOUT: "25"
-      MIN_SCORE: "35"
+      MIN_SCORE: "40"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
