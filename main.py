@@ -4,7 +4,7 @@ import requests
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
-message = "AI Trading Assistant V1 test alert successful ✅"
+message = "NEXUS AI Trading Assistant test alert successful ✅"
 
 if not BOT_TOKEN:
     raise ValueError("Missing TELEGRAM_BOT_TOKEN")

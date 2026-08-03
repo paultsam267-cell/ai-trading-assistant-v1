@@ -1,4 +1,4 @@
-name: ai-trading-scanner-daily
+name: nexus-ai-trading-assistant-daily
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ on:
       timezone: "Europe/Athens"
 
 concurrency:
-  group: ai-trading-scanner-daily-${{ github.ref }}
+  group: nexus-ai-trading-assistant-daily-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -32,10 +32,20 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+
+      - name: Restore trading memory
+        uses: actions/cache@v5
+        with:
+          path: |
+            intelligence_state
+            paper_state
+          key: trading-state-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            trading-state-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.11"
 
@@ -44,6 +54,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
+      - name: Run intelligence radar
+        run: python run_intelligence.py
+
       - name: Run scanner
         run: python scanner.py
 
@@ -51,7 +64,7 @@ jobs:
         run: python paper_trader.py
 
       - name: Upload scanner archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: scanner-archive
           path: archive

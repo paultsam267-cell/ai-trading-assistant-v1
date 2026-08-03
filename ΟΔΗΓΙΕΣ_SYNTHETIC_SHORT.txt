@@ -1,0 +1,38 @@
+AI TRADING ASSISTANT V1 - SYNTHETIC SHORT HOTFIX
+================================================
+
+ΤΙ ΠΡΟΣΘΕΤΕΙ
+- LONG και synthetic SHORT paper trading στο ίδιο demo wallet.
+- Τα SHORT είναι προσομοίωση 1x collateral.
+- Δεν υπάρχει πραγματικό borrow, leverage, funding, wallet ή exchange order.
+- Άνοιγμα SHORT μόνο σε SHORT_WATCH / SHORT signal που περνά αυστηρά φίλτρα.
+- Ξεχωριστό Short Stop Loss, 3 Take Profits, Trailing Stop, Max Hold και synthetic liquidation.
+- Το dashboard δείχνει πλευρά LONG/SHORT, margin, PnL και ξεχωριστούς κανόνες.
+- Ο scanner κρατά έως 2 SHORT_WATCH μέσα στα 8 στοιχεία του report, ώστε να μην τα πνίγουν τα LONG.
+
+ΠΡΟΕΠΙΛΟΓΕΣ SHORT
+- Stop Loss: -20%
+- Take Profit 1: +15%, κλείσιμο 25%
+- Take Profit 2: +30%, κλείσιμο 25%
+- Take Profit 3: +50%, κλείσιμο 25%
+- Trailing: ενεργοποίηση +20%, απόσταση 10%
+- Μέγιστη διάρκεια: 48 ώρες
+- Synthetic liquidation: adverse move +75%
+- Μέγιστα ανοιχτά SHORT: 2
+- Μέγεθος θέσης: ίδιο με LONG, προεπιλογή $25 collateral
+
+ΕΓΚΑΤΑΣΤΑΣΗ
+1. Κλείσε dashboard και PowerShell του project.
+2. Αντέγραψε όλα τα περιεχόμενα του ZIP μέσα στον υπάρχοντα φάκελο του project.
+3. Πάτησε Αντικατάσταση αρχείων.
+4. Μην πειράξεις τους φακέλους paper_state και archive.
+5. Δεν χρειάζεται νέο pip install.
+6. Τρέξε: .\RUN_TESTS.bat
+7. Πρέπει να περάσουν 22 tests.
+8. Μετά τρέξε: .\RUN_DEMO_APP.bat
+
+ΣΗΜΑΝΤΙΚΟ
+- Το ZIP δεν περιέχει paper_state ή archive και δεν σβήνει το υπάρχον wallet/PnL.
+- Χρειάζεται νέο scanner run για να αποθηκευτούν τα H1 buys/sells που χρησιμοποιούν τα SHORT filters.
+- Το κουμπί Εκτέλεση Paper Trader διαχειρίζεται και LONG και synthetic SHORT θέσεις.
+- PAPER TRADING ONLY.

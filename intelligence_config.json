@@ -1,0 +1,35 @@
+{
+  "pionex": {
+    "enabled": true,
+    "symbols": ["BTC_USDT_PERP", "ETH_USDT_PERP", "SOL_USDT_PERP", "BNB_USDT_PERP"],
+    "chain_symbol_map": {
+      "solana": "SOL_USDT_PERP",
+      "bsc": "BNB_USDT_PERP",
+      "global": "BTC_USDT_PERP"
+    },
+    "trade_limit": 120,
+    "depth_limit": 20,
+    "request_timeout": 15
+  },
+  "allocation": {
+    "mode": "DYNAMIC_PERCENT",
+    "early_pct": 1.0,
+    "normal_pct": 2.5,
+    "strong_pct": 4.0,
+    "maximum_pct": 5.0,
+    "max_total_exposure_pct": 20.0,
+    "fixed_early_usd": 2.0,
+    "fixed_normal_usd": 5.0,
+    "fixed_strong_usd": 10.0,
+    "fixed_maximum_usd": 15.0
+  },
+  "evaluation": {
+    "minimum_days": 30,
+    "minimum_closed_positions": 50
+  },
+  "whales": {
+    "enabled": true,
+    "lookback_hours": 24,
+    "max_transactions_per_wallet": 30
+  }
+}

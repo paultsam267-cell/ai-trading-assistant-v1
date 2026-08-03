@@ -1,0 +1,10 @@
+{
+  "snapshots": [],
+  "instructions": "Προαιρετικό. Προσθέτουμε snapshots με captured_at και bots. Δεν γίνεται μη τεκμηριωμένο scraping του Pionex leaderboard.",
+  "example_snapshot": {
+    "captured_at": "2026-07-03T00:05:00+03:00",
+    "bots": [
+      {"bot_id": "example-1", "pair": "SOL/USDT", "direction": "LONG", "leverage": 5, "profit_pct": 4.2, "lasting_minutes": 8, "rank": 12}
+    ]
+  }
+}
