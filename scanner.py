@@ -3,10 +3,14 @@ import os
 import time
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Any, Dict, Iterable, List, Tuple
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import requests
+
+from archive_utils import resolve_project_path, write_latest_pointer
+from intelligence_radar import load_latest_intelligence
 
 BASE_URL = "https://api.dexscreener.com"
 ATHENS_TZ = ZoneInfo("Europe/Athens")
@@ -24,13 +28,14 @@ MIN_H24_VOLUME = float(os.getenv("MIN_H24_VOLUME", "50000"))
 MAX_AGE_HOURS = float(os.getenv("MAX_AGE_HOURS", "72"))
 MAX_TOKENS_PER_CHAIN = int(os.getenv("MAX_TOKENS_PER_CHAIN", "60"))
 MAX_REPORT_ITEMS = int(os.getenv("MAX_REPORT_ITEMS", "8"))
+MAX_SHORT_REPORT_ITEMS = int(os.getenv("MAX_SHORT_REPORT_ITEMS", "2"))
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "25"))
 MIN_SCORE = float(os.getenv("MIN_SCORE", "40"))
 
 LATEST_PROFILES_ENDPOINT = f"{BASE_URL}/token-profiles/latest/v1"
 TOP_BOOSTS_ENDPOINT = f"{BASE_URL}/token-boosts/top/v1"
 
-ARCHIVE_DIR = "archive"
+ARCHIVE_DIR = resolve_project_path("ARCHIVE_DIR", "archive")
 ARCHIVE_ENABLED = os.getenv("ARCHIVE_ENABLED", "true").lower() == "true"
 
 
@@ -41,6 +46,49 @@ def safe_float(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+def build_intelligence_lines() -> List[str]:
+    try:
+        data = load_latest_intelligence() or {}
+        chains = ((data.get("fusion") or {}).get("by_chain") or {})
+        evaluation = data.get("evaluation") or {}
+
+        def chain_line(key: str, label: str) -> str:
+            item = chains.get(key) or {}
+            direction = item.get("direction") or item.get("state") or "UNKNOWN"
+            confidence = safe_float(item.get("confidence"))
+            return f"* {label}: {direction} | confidence {confidence:.2f}"
+
+        pionex_status = ((data.get("pionex") or {}).get("status") or "UNKNOWN")
+        leaderboard_status = (
+            (data.get("leaderboard") or {}).get("status") or "UNKNOWN"
+        )
+        whale_events = int(
+            safe_float((data.get("whales") or {}).get("event_count"))
+        )
+        observed_days = int(safe_float(evaluation.get("observed_days")))
+        minimum_days = int(
+            safe_float(evaluation.get("minimum_days"), 30)
+        )
+
+        return [
+            "",
+            "Pionex Intelligence",
+            f"* Status: {pionex_status}",
+            chain_line("bsc", "BSC"),
+            chain_line("solana", "Solana"),
+            f"* Leaderboard: {leaderboard_status}",
+            f"* Whale events: {whale_events}",
+            f"* Observation: {observed_days}/{minimum_days} days",
+            "",
+        ]
+    except Exception as exc:
+        return [
+            "",
+            f"Pionex Intelligence: UNAVAILABLE ({type(exc).__name__})",
+            "",
+        ]
+
 
 
 def now_local() -> datetime:
@@ -247,6 +295,33 @@ def is_candidate(pair: Dict[str, Any]) -> bool:
     return True
 
 
+
+def prioritize_report_mix(candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Κρατά έως δύο SHORT_WATCH μέσα στο report, χωρίς να χάνει το score ordering.
+
+    Έτσι ο paper trader βλέπει πτωτικές ευκαιρίες ακόμη κι όταν τα κορυφαία
+    LONG καταλαμβάνουν όλες τις θέσεις του report.
+    """
+    ordered = sorted(candidates, key=score_pair, reverse=True)
+    if MAX_REPORT_ITEMS <= 0 or not ordered:
+        return ordered
+
+    short_slots = max(min(MAX_SHORT_REPORT_ITEMS, MAX_REPORT_ITEMS), 0)
+    short_items = [p for p in ordered if classify_candidate(p) == "SHORT_WATCH"][:short_slots]
+    selected_ids = {id(p) for p in short_items}
+    selected = list(short_items)
+    for pair in ordered:
+        if id(pair) in selected_ids:
+            continue
+        if len(selected) >= MAX_REPORT_ITEMS:
+            break
+        selected.append(pair)
+        selected_ids.add(id(pair))
+
+    selected.sort(key=score_pair, reverse=True)
+    remainder = [p for p in ordered if id(p) not in selected_ids]
+    return selected + remainder
+
 def build_report_items(candidates: List[Dict[str, Any]]) -> List[str]:
     lines: List[str] = []
 
@@ -292,7 +367,7 @@ def build_daily_report(candidates: List[Dict[str, Any]]) -> str:
     ts = now_local().strftime("%d/%m/%Y %H:%M")
 
     header = [
-        "📡 AI Trading Scanner | Ημερήσιο Demo Report",
+        "📡 NEXUS AI Trading Assistant | Ημερήσιο Demo Report",
         f"🕒 Ώρα Ελλάδας: {ts}",
         "",
         "⚙️ Ενεργά φίλτρα:",
@@ -303,7 +378,9 @@ def build_daily_report(candidates: List[Dict[str, Any]]) -> str:
         f"• Μέγιστη ηλικία pair: {MAX_AGE_HOURS:.0f} ώρες",
         f"• Ελάχιστο score: {MIN_SCORE:.1f}",
         "",
-    ]
+       ]
+
+    header.extend(build_intelligence_lines())
 
     if not candidates:
         header.extend([
@@ -330,15 +407,15 @@ def build_daily_report(candidates: List[Dict[str, Any]]) -> str:
     return "\n".join(header + body + footer)
 
 
-def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> None:
+def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> Optional[Path]:
     if not ARCHIVE_ENABLED:
-        return
+        return None
 
-    os.makedirs(ARCHIVE_DIR, exist_ok=True)
+    ARCHIVE_DIR.mkdir(parents=True, exist_ok=True)
 
     ts = now_local()
     filename = ts.strftime("%Y-%m-%d_%H-%M-%S.json")
-    path = os.path.join(ARCHIVE_DIR, filename)
+    path = ARCHIVE_DIR / filename
 
     items = []
     for pair in candidates[:MAX_REPORT_ITEMS]:
@@ -346,6 +423,8 @@ def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> N
         items.append({
             "symbol": str(base.get("symbol") or "?").upper(),
             "name": str(base.get("name") or ""),
+            "token_address": str(base.get("address") or "").strip(),
+            "pair_address": str(pair.get("pairAddress") or "").strip(),
             "chain": str(pair.get("chainId", "?")).lower(),
             "dex": str(pair.get("dexId", "?")),
             "signal": classify_candidate(pair),
@@ -355,6 +434,7 @@ def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> N
             "liquidity_usd": safe_float(pair.get("liquidity", {}).get("usd")),
             "volume_h24": safe_float(pair.get("volume", {}).get("h24")),
             "change_h24": safe_float(pair.get("priceChange", {}).get("h24")),
+            "txns": pair.get("txns", {}) if isinstance(pair.get("txns"), dict) else {},
             "url": str(pair.get("url", "")).strip(),
         })
 
@@ -368,8 +448,12 @@ def save_report_archive(candidates: List[Dict[str, Any]], report_text: str) -> N
         "report_text": report_text,
     }
 
-    with open(path, "w", encoding="utf-8") as f:
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(temp_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+    temp_path.replace(path)
+    write_latest_pointer(ARCHIVE_DIR, path)
+    return path
 
 
 def send_telegram_message(text: str) -> None:
@@ -417,11 +501,17 @@ def main() -> None:
     print(f"Καλύτερα pairs μετά την επιλογή: {len(best_pairs)}")
     candidates = [pair for pair in best_pairs if is_candidate(pair)]
     print(f"Υποψήφια pairs μετά τα filters: {len(candidates)}")
-    candidates.sort(key=score_pair, reverse=True)
+    candidates = prioritize_report_mix(candidates)
+    short_in_report = sum(1 for pair in candidates[:MAX_REPORT_ITEMS] if classify_candidate(pair) == "SHORT_WATCH")
     print(f"Στοιχεία που μπήκαν στο report: {min(len(candidates), MAX_REPORT_ITEMS)}")
+    print(f"SHORT_WATCH στο report: {short_in_report}")
 
     report = build_daily_report(candidates)
-    save_report_archive(candidates, report)
+    saved_path = save_report_archive(candidates, report)
+    if saved_path is not None:
+        print(f"Αποθηκεύτηκε scanner archive: {saved_path}")
+    else:
+        print("ΠΡΟΣΟΧΗ: Το archive είναι απενεργοποιημένο (ARCHIVE_ENABLED=false).")
     send_telegram_message(report)
     print("Ολοκληρώθηκε το daily report.")
 

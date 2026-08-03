@@ -1,0 +1,8 @@
+{
+  "wallets": [],
+  "instructions": "Προσθέτουμε μόνο δημόσιες διευθύνσεις. Για Solana ορίζεται HELIUS_API_KEY. Για BSC ορίζεται BSCSCAN_API_KEY. Ποτέ seed phrase ή private key.",
+  "example": [
+    {"label": "Παράδειγμα Solana whale", "chain": "solana", "address": "PUBLIC_ADDRESS_ONLY", "weight": 1.0, "enabled": false},
+    {"label": "Παράδειγμα BSC whale", "chain": "bsc", "address": "0xPUBLIC_ADDRESS_ONLY", "weight": 1.0, "enabled": false}
+  ]
+}

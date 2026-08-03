@@ -1,0 +1,24 @@
+Pionex Bot Watchlist V1 build validation
+
+Python compile:
+app.py
+scanner.py
+paper_trader.py
+paper_risk.py
+risk_config.py
+archive_utils.py
+capital_management.py
+intelligence_radar.py
+run_intelligence.py
+pionex_bot_watchlist.py
+
+Unit tests:
+Ran 52 tests - OK
+
+Safety:
+PAPER TRADING ONLY
+Manual Pionex snapshots only
+No API keys
+No scraping
+No real orders
+Whale list is NOT part of this pass
