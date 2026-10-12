@@ -12,6 +12,9 @@ from zoneinfo import ZoneInfo
 
 import requests
 
+import market_scanner as ms
+import state_store
+import telegram_reporting
 from archive_utils import find_latest_archive as find_latest_scanner_archive, resolve_project_path
 from capital_management import (
     apply_profit_reserve,
@@ -46,6 +49,7 @@ STATE_DIR = resolve_project_path("PAPER_STATE_DIR", "paper_state")
 POSITIONS_FILE = STATE_DIR / "paper_positions.json"
 TRADES_FILE = STATE_DIR / "paper_trade_log.json"
 ACCOUNT_FILE = STATE_DIR / "paper_account.json"
+STATE_LOCK_TIMEOUT_SECONDS = float(os.getenv("PAPER_STATE_LOCK_TIMEOUT_SECONDS", "10"))
 
 INITIAL_CASH = float(os.getenv("PAPER_INITIAL_CASH", "1000"))
 
@@ -55,6 +59,10 @@ MIN_LIQUIDITY_USD = float(os.getenv("PAPER_MIN_LIQUIDITY_USD", "30000"))
 MIN_VOLUME_24H = float(os.getenv("PAPER_MIN_VOLUME_24H", "150000"))
 MAX_CHANGE_24H = float(os.getenv("PAPER_MAX_CHANGE_24H", "180"))
 MIN_CHANGE_24H = float(os.getenv("PAPER_MIN_CHANGE_24H", "10"))
+
+# Non-crypto market entry filters.  These deliberately do not reference DEX
+# liquidity, pair age or transaction-count fields.
+MARKET_MIN_ENTRY_SCORE = float(os.getenv("PAPER_MARKET_MIN_ENTRY_SCORE", "65"))
 
 # Synthetic SHORT entry filters. No real borrow, leverage or exchange order.
 MIN_SHORT_ENTRY_SCORE = float(os.getenv("PAPER_MIN_SHORT_ENTRY_SCORE", "40"))
@@ -66,6 +74,7 @@ SHORT_MIN_SELL_BUY_RATIO = float(os.getenv("PAPER_SHORT_MIN_SELL_BUY_RATIO", "1.
 
 DEX_API_BASE = "https://api.dexscreener.com"
 REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "20"))
+
 SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "ai-paper-trader-long-short-demo/4.0"})
 
@@ -89,15 +98,31 @@ def load_json_file(path: Path, default: Any) -> Any:
 
 
 def save_json_file(path: Path, data: Any) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(temp_path, "w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
-    temp_path.replace(path)
+    state_store.atomic_write_json(path, data)
+
+
+def state_transaction(*, timeout: Optional[float] = None) -> state_store.InterProcessFileLock:
+    """Return the one common lock used by every PAPER portfolio writer."""
+
+    return state_store.portfolio_lock(
+        STATE_DIR,
+        timeout=STATE_LOCK_TIMEOUT_SECONDS if timeout is None else timeout,
+    )
 
 
 def position_key(item: Dict[str, Any]) -> str:
+    asset_class = str(item.get("asset_class") or "CRYPTO").upper()
+    instrument_id = str(item.get("instrument_id") or "").strip()
+    if asset_class in ms.ALLOWED_ASSET_CLASSES and instrument_id:
+        # Separate namespace guarantees that a legacy crypto chain/dex/symbol
+        # triple can never collide with a Yahoo instrument identity.
+        return f"market:{asset_class.lower()}:{instrument_id}".lower()
     return f"{item.get('chain')}:{item.get('dex')}:{item.get('symbol')}".lower()
+
+
+def asset_class_of(item: Dict[str, Any]) -> str:
+    asset_class = str(item.get("asset_class") or "CRYPTO").upper()
+    return asset_class if asset_class in ms.ALLOWED_ASSET_CLASSES else "CRYPTO"
 
 
 def format_money(value: Any) -> str:
@@ -132,7 +157,10 @@ def format_pct(value: Any) -> str:
 
 
 def send_console_message(text: str) -> None:
-    print(text)
+    prepared = telegram_reporting.with_paper_header(text)
+    print(prepared)
+    if not telegram_reporting.send_notification(prepared, session=SESSION, timeout=REQUEST_TIMEOUT):
+        print("[TELEGRAM] BOT_TOKEN or CHAT_ID missing. Message kept console-only.")
 
 
 def load_account() -> Dict[str, Any]:
@@ -219,34 +247,91 @@ def classify_live_pair(pair: Dict[str, Any]) -> str:
     return "NEUTRAL"
 
 
-def refresh_open_position_prices(
+def fetch_open_position_market_data(
     positions: Dict[str, Dict[str, Any]],
     snapshot_map: Dict[str, Dict[str, Any]],
     at: datetime,
 ) -> Dict[str, Dict[str, Any]]:
-    """Ανανεώνει κάθε ανοιχτή LONG/SHORT θέση, ακόμη κι αν έπαψε να είναι scanner candidate."""
+    """Perform market-data network calls without holding the portfolio lock."""
+
     market_map: Dict[str, Dict[str, Any]] = {}
     for key, position in positions.items():
+        position = dict(position) if isinstance(position, dict) else {}
         normalize_position(position, key)
         market_item: Dict[str, Any] = {}
-        pair_ref = parse_pair_ref_from_url(str(position.get("url", "")))
-        if pair_ref:
-            pair = fetch_live_pair(*pair_ref)
-            if safe_float(pair.get("priceUsd")) > 0:
-                market_item = live_pair_to_market_item(pair, position)
+        asset_class = asset_class_of(position)
+        if asset_class == "CRYPTO":
+            pair_ref = parse_pair_ref_from_url(str(position.get("url", "")))
+            if pair_ref:
+                pair = fetch_live_pair(*pair_ref)
+                if safe_float(pair.get("priceUsd")) > 0:
+                    market_item = live_pair_to_market_item(pair, position)
+        else:
+            quote = ms.fetch_current_quote(
+                str(position.get("symbol", "")),
+                asset_class,
+                now=at,
+            )
+            if isinstance(quote, dict) and safe_float(quote.get("price_usd")) > 0:
+                market_item = quote
 
         if not market_item:
             snapshot_item = snapshot_map.get(key, {})
             if safe_float(snapshot_item.get("price_usd")) > 0:
                 market_item = snapshot_item
 
+        if safe_float(market_item.get("price_usd")) > 0:
+            market_map[key] = market_item
+    return market_map
+
+
+def apply_open_position_market_data(
+    positions: Dict[str, Dict[str, Any]],
+    market_map: Dict[str, Dict[str, Any]],
+    at: datetime,
+) -> List[str]:
+    """Revalidate fetched data and apply it to the latest locked positions."""
+
+    skipped: List[str] = []
+    for key, position in positions.items():
+        normalize_position(position, key)
+        market_item = market_map.get(key, {})
+        asset_class = asset_class_of(position)
         price = safe_float(market_item.get("price_usd"))
+
+        if asset_class != "CRYPTO" and price > 0:
+            market_timestamp = market_item.get("market_data_timestamp")
+            if not ms.is_market_timestamp_fresh(market_timestamp, asset_class, now=at):
+                price = 0.0
+            else:
+                position["market_data_timestamp"] = market_timestamp
+                position["market_source"] = market_item.get("source") or position.get("market_source")
+                position["currency"] = market_item.get("currency") or position.get("currency")
+                position["exchange"] = market_item.get("exchange") or position.get("exchange")
+
         if price > 0:
             set_fresh_price(position, price, at)
-            market_map[key] = market_item
-        else:
-            mark_price_missing(position)
-            print(f"{position.get('symbol', key)}: τιμή {position.get('price_status')} – δεν εκτελείται αυτόματη έξοδος.")
+            continue
+
+        mark_price_missing(position)
+        message = (
+            f"{position.get('symbol', key)}: {position.get('price_status')} market data; "
+            "exit skipped (STALE/MISSING => NO EXIT)."
+        )
+        skipped.append(message)
+        print(message)
+    return skipped
+
+
+def refresh_open_position_prices(
+    positions: Dict[str, Dict[str, Any]],
+    snapshot_map: Dict[str, Dict[str, Any]],
+    at: datetime,
+) -> Dict[str, Dict[str, Any]]:
+    """Compatibility wrapper; transactional callers use fetch/apply separately."""
+
+    market_map = fetch_open_position_market_data(positions, snapshot_map, at)
+    apply_open_position_market_data(positions, market_map, at)
     return market_map
 
 
@@ -352,7 +437,65 @@ def should_open_short(item: Dict[str, Any], account: Dict[str, Any], positions: 
     return True, f"{symbol}: επιτρέπεται SYNTHETIC SHORT demo θέση 1x."
 
 
+def should_open_market(
+    item: Dict[str, Any],
+    account: Dict[str, Any],
+    positions: Dict[str, Any],
+    intelligence: Optional[Dict[str, Any]] = None,
+):
+    """Asset-specific non-crypto gate with global portfolio limits."""
+    asset_class = asset_class_of(item)
+    symbol = str(item.get("symbol", "-")).upper()
+    signal = str(item.get("signal", "NEUTRAL")).upper()
+    score = safe_float(item.get("score"))
+    price = safe_float(item.get("price_usd"))
+    change = safe_float(item.get("change_h24"))
+    key = position_key(item)
+    cash = safe_float(account.get("cash"))
+    decision = allocation_decision(item, account, intelligence, positions)
+    planned_size = safe_float(decision.get("allocation_usd"))
+
+    if asset_class == "INDEX" or bool(item.get("analysis_only")) or item.get("paper_tradable") is False:
+        return False, f"{symbol}: INDEX/analysis-only instrument, δεν ανοίγει paper θέση."
+    if asset_class not in ms.TRADABLE_PAPER_ASSET_CLASSES:
+        return False, f"{symbol}: μη υποστηριζόμενο market asset class."
+    if decision.get("blocked"):
+        return False, f"{symbol}: μπλοκάρεται από το κοινό allocation/exposure policy ({decision.get('level')})."
+    if key in positions or any(
+        isinstance(position, dict)
+        and str(position.get("instrument_id") or "").upper() == str(item.get("instrument_id") or "").upper()
+        and asset_class_of(position) == asset_class
+        for position in positions.values()
+    ):
+        return False, f"{symbol}: υπάρχει ήδη ανοιχτή θέση για το instrument."
+    if len(positions) >= RISK_SETTINGS.max_open_positions:
+        return False, f"{symbol}: μπλοκάρεται λόγω global ορίου ανοιχτών θέσεων."
+    if signal not in {"LONG", "SHORT_WATCH"}:
+        return False, f"{symbol}: το market signal είναι NEUTRAL."
+    if signal == "SHORT_WATCH" and count_side(positions, "SHORT") >= RISK_SETTINGS.max_short_positions:
+        return False, f"{symbol}: συμπληρώθηκε το global όριο συνθετικών SHORT."
+    if price <= 0:
+        return False, f"{symbol}: μη έγκυρη market τιμή."
+    if not ms.is_market_timestamp_fresh(item.get("market_data_timestamp"), asset_class):
+        return False, f"{symbol}: STALE/MISSING market timestamp."
+    if cash < planned_size or planned_size <= 0:
+        return False, f"{symbol}: χαμηλό διαθέσιμο κοινό cash."
+    if score < MARKET_MIN_ENTRY_SCORE:
+        return False, f"{symbol}: χαμηλό market score ({score})."
+    if item.get("anti_chasing_ok") is False:
+        return False, f"{symbol}: μπλοκάρεται από anti-chasing guard."
+
+    extreme_limit = 3.0 if asset_class == "FX" else 8.0 if asset_class == "METAL" else 10.0
+    if signal == "LONG" and change > extreme_limit:
+        return False, f"{symbol}: ακραία πρόσφατη άνοδος, αποφεύγεται chasing ({format_pct(change)})."
+    if signal == "SHORT_WATCH" and change < -extreme_limit:
+        return False, f"{symbol}: ακραία πρόσφατη πτώση, αποφεύγεται chasing ({format_pct(change)})."
+    return True, f"{symbol}: επιτρέπεται {signal} {asset_class} PAPER θέση."
+
+
 def should_open_position(item: Dict[str, Any], account: Dict[str, Any], positions: Dict[str, Any], intelligence: Optional[Dict[str, Any]] = None):
+    if asset_class_of(item) != "CRYPTO":
+        return should_open_market(item, account, positions, intelligence)
     signal = str(item.get("signal", "NEUTRAL")).upper()
     if signal in {"SHORT", "SHORT_WATCH"}:
         return should_open_short(item, account, positions, intelligence)
@@ -376,6 +519,7 @@ def open_demo_position(
     symbol = str(item.get("symbol", "")).upper()
     signal = str(item.get("signal", "LONG")).upper()
     side = "SHORT" if signal in {"SHORT", "SHORT_WATCH"} else "LONG"
+    asset_class = asset_class_of(item)
     price = safe_float(item.get("price_usd"))
     allocation_meta = allocation_decision(item, account, intelligence, positions)
     allocation = min(safe_float(allocation_meta.get("allocation_usd")), safe_float(account.get("cash")))
@@ -394,8 +538,16 @@ def open_demo_position(
         "leverage": 1.0,
         "symbol": symbol,
         "name": str(item.get("name", "")),
+        "asset_class": asset_class,
+        "instrument_id": str(item.get("instrument_id") or "").strip(),
+        "market_source": str(item.get("source") or ("DexScreener" if asset_class == "CRYPTO" else "")).strip(),
+        "currency": str(item.get("currency") or ("USD" if asset_class != "CRYPTO" else "")).strip(),
+        "exchange": str(item.get("exchange") or "").strip(),
+        "market_data_timestamp": item.get("market_data_timestamp"),
         "chain": str(item.get("chain", "")).lower(),
         "dex": str(item.get("dex", "")).lower(),
+        "token_address": str(item.get("token_address") or "").strip(),
+        "pair_address": str(item.get("pair_address") or "").strip(),
         "entry_price": price,
         "quantity": quantity,
         "initial_quantity": quantity,
@@ -435,6 +587,11 @@ def open_demo_position(
             "side": side,
             "time": opened_at,
             "symbol": symbol,
+            "asset_class": asset_class,
+            "instrument_id": position["instrument_id"],
+            "market_source": position["market_source"],
+            "currency": position["currency"],
+            "exchange": position["exchange"],
             "chain": position["chain"],
             "dex": position["dex"],
             "price": price,
@@ -446,43 +603,23 @@ def open_demo_position(
             "reason": trade_reason,
             "url": position["url"],
             "synthetic_short": side == "SHORT",
+            "entry_price": price,
+            "stop_loss": initial_stop,
+            "take_profit": "/".join(
+                f"+{level[1]:.0f}%" for level in RISK_SETTINGS.take_profit_levels(side)
+            ),
+            "pnl_usd": 0.0,
+            "pnl_pct": 0.0,
+            "price_status": "FRESH",
+            "market_data_timestamp": position.get("market_data_timestamp"),
         }
     )
-
-    if side == "SHORT":
-        return (
-            "DEMO SYNTHETIC SHORT\n"
-            f"Token: {symbol}\n"
-            f"Τιμή εισόδου: {format_price(price)}\n"
-            f"Collateral 1x: {format_money(allocation)}\n"
-            f"Short Stop Loss: {format_price(initial_stop)}\n"
-            f"Δυναμική κατανομή: {allocation_meta.get('allocation_pct', 0):.2f}% ({allocation_meta.get('level')})\n"
-            f"Υπόλοιπο cash: {format_money(account.get('cash'))}\n"
-            "Σημείωση: προσομοίωση μόνο, χωρίς πραγματικό borrow ή order."
-        )
-
-    return (
-        "DEMO ΑΓΟΡΑ LONG\n"
-        f"Token: {symbol}\n"
-        f"Τιμή εισόδου: {format_price(price)}\n"
-        f"Μέγεθος θέσης: {format_money(allocation)}\n"
-        f"Αρχικό Stop Loss: {format_price(initial_stop)}\n"
-        f"Δυναμική κατανομή: {allocation_meta.get('allocation_pct', 0):.2f}% ({allocation_meta.get('level')})\n"
-        f"Υπόλοιπο cash: {format_money(account.get('cash'))}"
-    )
+    return telegram_reporting.format_trade_report(trades[-1], freshness_status="FRESH")
 
 
 def action_message(action: Dict[str, Any]) -> str:
-    side = str(action.get("side", "LONG")).upper()
-    title = "DEMO ΚΛΕΙΣΙΜΟ SYNTHETIC SHORT" if side == "SHORT" else "DEMO ΠΩΛΗΣΗ LONG"
-    return (
-        f"{title}\n"
-        f"Token: {action.get('symbol', '')}\n"
-        f"Αιτία: {action.get('reason', '')}\n"
-        f"Τιμή: {format_price(action.get('exit_price'))}\n"
-        f"Αποτέλεσμα: {format_money(action.get('pnl_usd'))}\n"
-        f"Κατάσταση: {'Πλήρες κλείσιμο' if action.get('fully_closed') else 'Μερικό κλείσιμο'}"
-    )
+    record = action.get("trade") if isinstance(action.get("trade"), dict) else action
+    return telegram_reporting.format_trade_report(record, freshness_status=str(record.get("price_status") or "FRESH"))
 
 
 def build_summary(account: Dict[str, Any], positions: Dict[str, Any], snapshot: Dict[str, Any]) -> str:
@@ -520,48 +657,57 @@ def main() -> None:
     snapshot = load_latest_snapshot()
     snapshot_map = build_market_map(snapshot)
     intelligence = load_latest_intelligence()
-    account = load_account()
-    positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
-    trades = load_json_file(TRADES_FILE, [])
-    if not isinstance(trades, list):
-        trades = []
+    with state_transaction():
+        position_snapshot = normalize_positions(load_json_file(POSITIONS_FILE, {}))
 
-    refresh_open_position_prices(positions, snapshot_map, run_at)
-    active_equity_at_start = calculate_equity(account, positions)
-    ensure_daily_snapshot(account, total_equity(active_equity_at_start, account), run_at)
+    # All network work is deliberately outside the common state lock.
+    market_map = fetch_open_position_market_data(position_snapshot, snapshot_map, run_at)
 
     alerts: List[str] = []
-    closed_keys = set()
-    for key in list(positions.keys()):
-        actions = evaluate_position(account, positions, trades, key, at=run_at)
-        for action in actions:
-            alerts.append(action_message(action))
-            if action.get("fully_closed"):
-                closed_keys.add(key)
+    with state_transaction():
+        # Reload and revalidate every entry/exit against the latest common state.
+        account = load_account()
+        positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
+        trades = load_json_file(TRADES_FILE, [])
+        if not isinstance(trades, list):
+            trades = []
 
-    reserve_result = apply_profit_reserve(account, at=run_at)
-    if reserve_result["transferred"] > 0:
-        alerts.append(
-            "ΑΥΤΟΜΑΤΗ ΜΕΤΑΦΟΡΑ ΣΤΟ ΑΠΟΘΕΜΑΤΙΚΟ\n"
-            f"Ποσό: {format_money(reserve_result['transferred'])}\n"
-            f"Κανόνας: {safe_float(account.get('reserve_rate_pct')):.0f}% του νέου peak καθαρού πραγματοποιημένου κέρδους."
-        )
+        apply_open_position_market_data(positions, market_map, now_local())
+        active_equity_at_start = calculate_equity(account, positions)
+        ensure_daily_snapshot(account, total_equity(active_equity_at_start, account), run_at)
 
-    for item in snapshot.get("items", []):
-        if not isinstance(item, dict) or position_key(item) in closed_keys:
-            continue
-        message = open_demo_position(account, positions, trades, item, run_at, intelligence)
-        if message:
-            alerts.append(message)
+        closed_keys = set()
+        for key in list(positions.keys()):
+            actions = evaluate_position(account, positions, trades, key, at=run_at)
+            for action in actions:
+                alerts.append(action_message(action))
+                if action.get("fully_closed"):
+                    closed_keys.add(key)
 
-    account["last_update"] = format_local(run_at)
-    save_json_file(POSITIONS_FILE, positions)
-    save_json_file(TRADES_FILE, trades)
-    save_json_file(ACCOUNT_FILE, account)
+        reserve_result = apply_profit_reserve(account, at=run_at)
+        if reserve_result["transferred"] > 0:
+            alerts.append(
+                "ΑΥΤΟΜΑΤΗ ΜΕΤΑΦΟΡΑ ΣΤΟ ΑΠΟΘΕΜΑΤΙΚΟ\n"
+                f"Ποσό: {format_money(reserve_result['transferred'])}\n"
+                f"Κανόνας: {safe_float(account.get('reserve_rate_pct')):.0f}% του νέου peak καθαρού πραγματοποιημένου κέρδους."
+            )
+
+        for item in snapshot.get("items", []):
+            if not isinstance(item, dict) or position_key(item) in closed_keys:
+                continue
+            message = open_demo_position(account, positions, trades, item, run_at, intelligence)
+            if message:
+                alerts.append(message)
+
+        account["last_update"] = format_local(run_at)
+        save_json_file(POSITIONS_FILE, positions)
+        save_json_file(TRADES_FILE, trades)
+        save_json_file(ACCOUNT_FILE, account)
+        summary = build_summary(account, positions, snapshot)
 
     for alert in alerts:
         send_console_message(alert)
-    send_console_message(build_summary(account, positions, snapshot))
+    send_console_message(summary)
     print("Ο paper trader ολοκληρώθηκε σε PAPER TRADING ONLY mode. Τα SHORT είναι synthetic 1x simulation.")
 
 

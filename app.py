@@ -11,6 +11,7 @@ from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 import requests
+import state_store
 
 from archive_utils import find_latest_archive as find_latest_scanner_archive, resolve_project_path
 from capital_management import (
@@ -45,7 +46,7 @@ from intelligence_radar import load_latest_intelligence
 from pionex_bot_watchlist import add_manual_snapshot, analyze_snapshots, load_summary as load_pionex_bot_summary, summary_for_display
 from flask import Flask, render_template_string, redirect, request, url_for
 
-APP_TITLE = "NEXUS AI Trading Assistant • LONG + Synthetic SHORT"
+APP_TITLE = "AI Trading Assistant V1 • LONG + Synthetic SHORT"
 ATHENS_TZ = ZoneInfo("Europe/Athens")
 
 ARCHIVE_DIR = resolve_project_path("ARCHIVE_DIR", "archive")
@@ -602,11 +603,11 @@ def load_json_file(path: Path, default: Any) -> Any:
 
 
 def save_json_file(path: Path, data: Any) -> None:
-    STATE_DIR.mkdir(parents=True, exist_ok=True)
-    temp_path = path.with_suffix(path.suffix + ".tmp")
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    temp_path.replace(path)
+    state_store.atomic_write_json(path, data)
+
+
+def state_transaction() -> state_store.InterProcessFileLock:
+    return state_store.portfolio_lock(STATE_DIR)
 
 
 def format_money(value: float) -> str:
@@ -1214,47 +1215,51 @@ def manual_close_position(position_key: str):
         if percent not in {25, 50, 75, 100}:
             raise ValueError("Μη επιτρεπτό ποσοστό κλεισίματος.")
 
-        account = load_json_file(ACCOUNT_FILE, {})
-        positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
-        trades = load_json_file(TRADES_FILE, [])
-        if not isinstance(account, dict):
-            account = {}
-        account = normalize_account(account, default_initial=INITIAL_CAPITAL)
-        if not isinstance(trades, list):
-            trades = []
+        with state_transaction():
+            position_snapshot = normalize_positions(load_json_file(POSITIONS_FILE, {})).get(position_key)
+            if not isinstance(position_snapshot, dict):
+                raise ValueError("Η θέση δεν βρέθηκε.")
+            pair_ref = parse_pair_ref_from_url(str(position_snapshot.get("url", "")))
 
-        position = positions.get(position_key)
-        if not isinstance(position, dict):
-            raise ValueError("Η θέση δεν βρέθηκε.")
-
-        pair_ref = parse_pair_ref_from_url(str(position.get("url", "")))
+        # Network access remains outside the common portfolio lock.
         live_pair = fetch_live_pair(*pair_ref) if pair_ref else {}
         live_price = safe_float(live_pair.get("priceUsd"))
         if live_price <= 0:
             raise ValueError("Δεν υπάρχει έγκυρη φρέσκια τιμή. Η θέση δεν άλλαξε.")
 
         at = now_local()
-        set_fresh_price(position, live_price, at)
-        active_equity_before = calculate_equity(account, positions)
-        ensure_daily_snapshot(account, total_equity(active_equity_before, account), at)
-        result = execute_sale(
-            account,
-            positions,
-            trades,
-            position_key,
-            live_price,
-            "MANUAL_CLOSE",
-            sell_fraction_remaining=percent / 100.0,
-            at=at,
-        )
-        if not result:
-            raise ValueError("Δεν ολοκληρώθηκε η demo πώληση.")
+        with state_transaction():
+            account = load_json_file(ACCOUNT_FILE, {})
+            positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
+            trades = load_json_file(TRADES_FILE, [])
+            account = normalize_account(account if isinstance(account, dict) else {}, default_initial=INITIAL_CAPITAL)
+            if not isinstance(trades, list):
+                trades = []
+            position = positions.get(position_key)
+            if not isinstance(position, dict):
+                raise ValueError("Η θέση άλλαξε πριν το κλείσιμο. Δεν έγινε έξοδος.")
 
-        reserve_result = apply_profit_reserve(account, at=at)
-        account["last_update"] = now_local_str()
-        save_json_file(ACCOUNT_FILE, account)
-        save_json_file(POSITIONS_FILE, positions)
-        save_json_file(TRADES_FILE, trades)
+            set_fresh_price(position, live_price, at)
+            active_equity_before = calculate_equity(account, positions)
+            ensure_daily_snapshot(account, total_equity(active_equity_before, account), at)
+            result = execute_sale(
+                account,
+                positions,
+                trades,
+                position_key,
+                live_price,
+                "MANUAL_CLOSE",
+                sell_fraction_remaining=percent / 100.0,
+                at=at,
+            )
+            if not result:
+                raise ValueError("Δεν ολοκληρώθηκε η demo πώληση.")
+
+            reserve_result = apply_profit_reserve(account, at=at)
+            account["last_update"] = now_local_str()
+            save_json_file(ACCOUNT_FILE, account)
+            save_json_file(POSITIONS_FILE, positions)
+            save_json_file(TRADES_FILE, trades)
         reserve_note = ""
         if reserve_result["transferred"] > 0:
             reserve_note = f" Στο αποθεματικό μεταφέρθηκαν {format_money(reserve_result['transferred'])}."
@@ -1334,36 +1339,37 @@ def new_simulation():
         initial_capital = validate_initial_capital(request.form.get("initial_capital"))
         at = now_local()
 
-        old_account = normalize_account(
-            load_json_file(ACCOUNT_FILE, {}),
-            default_initial=INITIAL_CAPITAL,
-        )
-        old_positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
-        old_trades = load_json_file(TRADES_FILE, [])
-        if not isinstance(old_trades, list):
-            old_trades = []
-
-        history = load_json_file(SIMULATION_HISTORY_FILE, [])
-        if not isinstance(history, list):
-            history = []
-        active_equity = calculate_equity(
-            old_account,
-            old_positions,
-            use_cost_basis_when_unavailable=True,
-        )
-        history.append(
-            simulation_summary(
-                old_account,
-                active_equity=active_equity,
-                open_positions=len(old_positions),
-                trade_count=len(old_trades),
-                at=at,
+        with state_transaction():
+            old_account = normalize_account(
+                load_json_file(ACCOUNT_FILE, {}),
+                default_initial=INITIAL_CAPITAL,
             )
-        )
-        save_json_file(SIMULATION_HISTORY_FILE, history[-100:])
-        save_json_file(ACCOUNT_FILE, new_simulation_account(initial_capital, at=at))
-        save_json_file(POSITIONS_FILE, {})
-        save_json_file(TRADES_FILE, [])
+            old_positions = normalize_positions(load_json_file(POSITIONS_FILE, {}))
+            old_trades = load_json_file(TRADES_FILE, [])
+            if not isinstance(old_trades, list):
+                old_trades = []
+
+            history = load_json_file(SIMULATION_HISTORY_FILE, [])
+            if not isinstance(history, list):
+                history = []
+            active_equity = calculate_equity(
+                old_account,
+                old_positions,
+                use_cost_basis_when_unavailable=True,
+            )
+            history.append(
+                simulation_summary(
+                    old_account,
+                    active_equity=active_equity,
+                    open_positions=len(old_positions),
+                    trade_count=len(old_trades),
+                    at=at,
+                )
+            )
+            save_json_file(SIMULATION_HISTORY_FILE, history[-100:])
+            save_json_file(ACCOUNT_FILE, new_simulation_account(initial_capital, at=at))
+            save_json_file(POSITIONS_FILE, {})
+            save_json_file(TRADES_FILE, [])
         LAST_RUN_MESSAGE = (
             f"✅ Ξεκίνησε νέα προσομοίωση με αρχικό κεφάλαιο {format_money(initial_capital)}. "
             "Η προηγούμενη σύνοψη αρχειοθετήθηκε."
@@ -1378,30 +1384,31 @@ def use_profit_reserve():
     global LAST_RUN_MESSAGE
     try:
         at = now_local()
-        account = normalize_account(
-            load_json_file(ACCOUNT_FILE, {}),
-            default_initial=INITIAL_CAPITAL,
-        )
-        trades = load_json_file(TRADES_FILE, [])
-        if not isinstance(trades, list):
-            trades = []
-        released = release_reserve(account, request.form.get("amount"), at=at)
-        trades.append(
-            {
-                "type": "RESERVE_RELEASE",
-                "side": "CASH",
-                "time": now_local_str(),
-                "symbol": "ΑΠΟΘΕΜΑΤΙΚΟ",
-                "chain": "demo",
-                "price": released,
-                "pnl_usd": 0.0,
-                "reason": "EMERGENCY_RESERVE_USE",
-                "cash_change_usd": released,
-            }
-        )
-        account["last_update"] = now_local_str()
-        save_json_file(ACCOUNT_FILE, account)
-        save_json_file(TRADES_FILE, trades)
+        with state_transaction():
+            account = normalize_account(
+                load_json_file(ACCOUNT_FILE, {}),
+                default_initial=INITIAL_CAPITAL,
+            )
+            trades = load_json_file(TRADES_FILE, [])
+            if not isinstance(trades, list):
+                trades = []
+            released = release_reserve(account, request.form.get("amount"), at=at)
+            trades.append(
+                {
+                    "type": "RESERVE_RELEASE",
+                    "side": "CASH",
+                    "time": now_local_str(),
+                    "symbol": "ΑΠΟΘΕΜΑΤΙΚΟ",
+                    "chain": "demo",
+                    "price": released,
+                    "pnl_usd": 0.0,
+                    "reason": "EMERGENCY_RESERVE_USE",
+                    "cash_change_usd": released,
+                }
+            )
+            account["last_update"] = now_local_str()
+            save_json_file(ACCOUNT_FILE, account)
+            save_json_file(TRADES_FILE, trades)
         LAST_RUN_MESSAGE = (
             f"✅ Μεταφέρθηκαν {format_money(released)} από το αποθεματικό "
             "στο ενεργό demo cash."
@@ -1530,7 +1537,7 @@ def reset_demo_wallet():
 
 if __name__ == "__main__":
     print("======================================")
-    print("NEXUS AI Trading Assistant - Ελληνικό Demo")
+    print("AI Trading Assistant V1 - Ελληνικό Demo")
     print("Τοπικά: http://127.0.0.1:5000")
     print("Κινητό στο ίδιο Wi-Fi: http://IP-LAPTOP:5000")
     print("======================================")
