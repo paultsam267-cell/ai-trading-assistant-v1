@@ -140,12 +140,39 @@ class CapitalDashboardTests(unittest.TestCase):
             )
             positions_file.write_text("{}", encoding="utf-8")
             trades_file.write_text("[]", encoding="utf-8")
+
+            # Hard isolation guard: even if a future refactor introduces a new
+            # global path, this test must fail before it can read or write the
+            # production paper_state directory.
+            allowed_files = {
+                path.resolve()
+                for path in (account_file, positions_file, trades_file, history_file)
+            }
+            original_load = dashboard_app.load_json_file
+            original_save = dashboard_app.save_json_file
+
+            def isolated_load(path, default):
+                resolved = Path(path).resolve()
+                if resolved not in allowed_files:
+                    raise AssertionError(f"test attempted production-state read: {resolved}")
+                return original_load(path, default)
+
+            def isolated_save(path, data):
+                resolved = Path(path).resolve()
+                if resolved not in allowed_files:
+                    raise AssertionError(f"test attempted production-state write: {resolved}")
+                return original_save(path, data)
+
             with patch.object(dashboard_app, "STATE_DIR", state), patch.object(
                 dashboard_app, "POSITIONS_FILE", positions_file
             ), patch.object(dashboard_app, "TRADES_FILE", trades_file), patch.object(
                 dashboard_app, "ACCOUNT_FILE", account_file
             ), patch.object(dashboard_app, "SIMULATION_HISTORY_FILE", history_file), patch.object(
                 dashboard_app, "ARCHIVE_DIR", archive
+            ), patch.object(
+                dashboard_app, "load_json_file", side_effect=isolated_load
+            ), patch.object(
+                dashboard_app, "save_json_file", side_effect=isolated_save
             ):
                 client = dashboard_app.app.test_client()
                 response = client.post(

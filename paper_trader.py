@@ -79,6 +79,16 @@ SESSION = requests.Session()
 SESSION.headers.update({"User-Agent": "ai-paper-trader-long-short-demo/4.0"})
 
 
+def require_local_paper_execution() -> None:
+    """Reject every PAPER trading-engine invocation inside GitHub Actions."""
+
+    if os.getenv("GITHUB_ACTIONS", "").strip().lower() == "true":
+        raise RuntimeError(
+            "FAIL-CLOSED: paper_trader cannot run in GitHub Actions; "
+            "ephemeral workflow/cache state is never authoritative"
+        )
+
+
 def now_local() -> datetime:
     return datetime.now(timezone.utc).astimezone(ATHENS_TZ)
 
@@ -652,6 +662,7 @@ def build_summary(account: Dict[str, Any], positions: Dict[str, Any], snapshot: 
 
 
 def main() -> None:
+    require_local_paper_execution()
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     run_at = now_local()
     snapshot = load_latest_snapshot()

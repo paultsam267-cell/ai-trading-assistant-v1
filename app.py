@@ -46,7 +46,7 @@ from intelligence_radar import load_latest_intelligence
 from pionex_bot_watchlist import add_manual_snapshot, analyze_snapshots, load_summary as load_pionex_bot_summary, summary_for_display
 from flask import Flask, render_template_string, redirect, request, url_for
 
-APP_TITLE = "AI Trading Assistant V1 • LONG + Synthetic SHORT"
+APP_TITLE = "P-DJD NEXUS AI TRADING ASSISTANT • LONG + Synthetic SHORT"
 ATHENS_TZ = ZoneInfo("Europe/Athens")
 
 ARCHIVE_DIR = resolve_project_path("ARCHIVE_DIR", "archive")
@@ -1537,7 +1537,7 @@ def reset_demo_wallet():
 
 if __name__ == "__main__":
     print("======================================")
-    print("AI Trading Assistant V1 - Ελληνικό Demo")
+    print("P-DJD NEXUS AI TRADING ASSISTANT - Ελληνικό PAPER Demo")
     print("Τοπικά: http://127.0.0.1:5000")
     print("Κινητό στο ίδιο Wi-Fi: http://IP-LAPTOP:5000")
     print("======================================")
