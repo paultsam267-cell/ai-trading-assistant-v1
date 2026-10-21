@@ -1,6 +1,9 @@
 name: P-DJD Telegram Controlled Test
 
 on:
+  schedule:
+    - cron: '0 21 * * *'
+      timezone: 'Europe/Athens'
   workflow_dispatch:
     inputs:
       send_report:
@@ -41,11 +44,11 @@ jobs:
         run: python -B github_multi_asset_report.py --self-test
 
       - name: Preview only
-        if: ${{ !inputs.send_report }}
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.send_report }}
         run: python -B github_multi_asset_report.py
 
       - name: Verified Telegram delivery
-        if: ${{ inputs.send_report }}
+        if: ${{ github.event_name == 'schedule' || inputs.send_report }}
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.NEXUS_TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.NEXUS_TELEGRAM_CHAT_ID }}
