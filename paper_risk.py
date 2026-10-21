@@ -145,6 +145,18 @@ def normalize_position(position: MutableMapping[str, Any], key: Optional[str] = 
     position["opened_at"] = str(position.get("opened_at") or position.get("entry_time") or "")
     position["entry_time"] = str(position.get("entry_time") or position.get("opened_at") or "")
 
+    # Old records predate the multi-asset schema and are crypto by definition.
+    position["asset_class"] = str(position.get("asset_class") or "CRYPTO").upper()
+    position.setdefault("instrument_id", "")
+    position.setdefault("market_source", "DexScreener" if position["asset_class"] == "CRYPTO" else "")
+    position.setdefault("currency", "")
+    position.setdefault("exchange", "")
+    position.setdefault("market_data_timestamp", None)
+    position.setdefault("token_address", "")
+    position.setdefault("pair_address", "")
+    position.setdefault("chain", "")
+    position.setdefault("dex", "")
+
     current_price = safe_float(position.get("current_price"), 0.0)
     position["current_price"] = current_price if current_price > 0 else None
     position.setdefault("last_price_update_at", None)
@@ -320,6 +332,7 @@ def execute_sale(
         "side": side,
         "time": format_local(at or now_athens()),
         "symbol": position.get("symbol", ""),
+        "asset_class": position.get("asset_class", "CRYPTO"),
         "chain": position.get("chain", ""),
         "dex": position.get("dex", ""),
         "entry_price": entry_price,
@@ -336,6 +349,10 @@ def execute_sale(
         "reason": reason,
         "url": position.get("url", ""),
         "synthetic_short": side == "SHORT",
+        "price_status": effective_price_status(position, at or now_athens()),
+        "market_data_timestamp": position.get("market_data_timestamp"),
+        "stop_loss": position.get("dynamic_stop_price"),
+        "take_profit": ",".join(str(level) for level in position.get("take_profit_levels_completed", [])) or "N/A",
     }
     trades.append(trade)
 
@@ -361,6 +378,7 @@ def execute_sale(
         "pnl_usd": pnl,
         "fully_closed": fully_closed,
         "remaining_quantity": 0.0 if fully_closed else position["remaining_quantity"],
+        "trade": trade,
     }
 
 
@@ -484,7 +502,9 @@ def calculate_equity(
             continue
         normalize_position(position, key)
         price = safe_float(position.get("current_price"))
-        if price > 0:
+        price_status = str(position.get("price_status") or "").upper()
+
+        if price > 0 and price_status == "FRESH":
             equity += position_equity_value(position, price)
         elif use_cost_basis_when_unavailable:
             equity += safe_float(position.get("remaining_cost_basis"))
