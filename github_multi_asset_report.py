@@ -62,12 +62,42 @@ def market_rows():
     return market.scan_market()
 
 
+
+def choose_report_rows(ranked, limit=8):
+    """Cover available asset classes, then fill by global rank."""
+    if limit <= 0:
+        return []
+
+    ordered = sorted(ranked, key=normalized, reverse=True)
+    selected = []
+    used = set()
+
+    for asset in ("CRYPTO", "STOCK", "ETF", "METAL", "FX", "INDEX"):
+        for row in ordered:
+            if row.get("asset_class") == asset and id(row) not in used:
+                selected.append(row)
+                used.add(id(row))
+                break
+
+        if len(selected) >= limit:
+            return sorted(selected, key=normalized, reverse=True)
+
+    for row in ordered:
+        if id(row) not in used:
+            selected.append(row)
+            used.add(id(row))
+
+        if len(selected) >= limit:
+            break
+
+    return sorted(selected, key=normalized, reverse=True)
+
 def make_report(rows, warnings):
     stamp = datetime.now(ZoneInfo("Europe/Athens")).strftime(
         "%d/%m/%Y %H:%M"
     )
     ranked = sorted(rows, key=normalized, reverse=True)
-    selected = ranked[:8]
+    selected = choose_report_rows(ranked, limit=8)
 
     lines = [
         "P-DJD NEXUS AI TRADING ASSISTANT",
