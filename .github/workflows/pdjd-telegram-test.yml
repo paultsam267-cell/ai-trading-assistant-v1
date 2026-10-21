@@ -1,0 +1,52 @@
+name: P-DJD Telegram Controlled Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      send_report:
+        description: "Send PAPER opportunity report to verified P-DJD bot"
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdjd-telegram-controlled-test
+  cancel-in-progress: false
+
+jobs:
+  telegram-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARCHIVE_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: python -m pip install "requests>=2.31,<3"
+
+      - name: Offline self-test
+        run: python -B github_multi_asset_report.py --self-test
+
+      - name: Preview only
+        if: ${{ !inputs.send_report }}
+        run: python -B github_multi_asset_report.py
+
+      - name: Verified Telegram delivery
+        if: ${{ inputs.send_report }}
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.NEXUS_TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.NEXUS_TELEGRAM_CHAT_ID }}
+        run: python -B github_multi_asset_report.py --send
