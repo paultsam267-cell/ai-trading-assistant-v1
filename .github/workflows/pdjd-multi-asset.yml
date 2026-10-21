@@ -1,0 +1,38 @@
+name: P-DJD Multi-Asset Preview
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pdjd-multi-asset-preview
+  cancel-in-progress: false
+
+jobs:
+  market-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      ARCHIVE_ENABLED: "false"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install requests
+        run: python -m pip install "requests>=2.31,<3"
+
+      - name: Offline self-test
+        run: python -B github_multi_asset_report.py --self-test
+
+      - name: Live market preview without Telegram
+        run: python -B github_multi_asset_report.py
